@@ -6,7 +6,7 @@
   },
   "package": {
     "productName": "teralauncher",
-    "version": "0.0.6"
+    "version": "1.1.1"
   },
   "tauri": {
     "allowlist": {
@@ -37,11 +37,11 @@
       "targets": "all",
       "identifier": "com.teralib.dev",
       "icon": [
-        "icons/tera_server.png",
-        "icons/tera_server.ico"
+        "icons/logo.png",
+        "icons/logo.ico"
       ],
       "copyright": "Tera Launcher",
-      "shortDescription": "A Tauri Launcher for Tera Pserver"
+      "shortDescription": "Neolithic TERA Launcher"
     }
   }
 }

@@ -1,0 +1,37 @@
+<section class="login-form-container-wrapper">
+    <div class="login-form-container">
+      <div class="tera-logo-1-wrapper">
+        <img
+          class="tera-logo-1-icon"
+          loading="lazy"
+          alt=""
+          src="./assets/tera-logo@2x.png"
+        />
+      </div>
+      <form class="login-form signup-form" autocomplete="off">
+        <div class="login-wrapper">
+          <span class="login1" data-translate="VERIFY_TITLE">Verify Email</span>
+        </div>
+        <div class="verify-info">
+          <p data-translate="VERIFY_INFO">A verification code has been sent to your email address. Please enter the code below to complete your registration.</p>
+        </div>
+        <div class="input-fields-wrapper">
+          <div class="input-fields">
+            <input class="input-text" id="verify-code" name="code" data-translate-placeholder="VERIFY_CODE_PLACEHOLDER" placeholder="Verification Code" type="text" maxlength="10" />
+          </div>
+        </div>
+        <div class="signup-error-msg" id="verify-error-msg">
+        </div>
+        <div class="signup-success-msg" id="verify-success-msg">
+        </div>
+        <div class="btn-wrapper">
+          <button class="btn" id="verify-button" type="button">
+            <a class="login2" data-translate="VERIFY_BUTTON">VERIFY</a>
+          </button>
+        </div>
+        <div class="create-account-wrapper">
+          <a href="#" id="back-to-signup-link" data-translate="BACK_TO_SIGNUP_LINK">Back to Sign Up</a>
+        </div>
+      </form>
+    </div>
+  </section>

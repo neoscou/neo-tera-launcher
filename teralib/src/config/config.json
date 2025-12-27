@@ -1,6 +1,9 @@
 {
-    "LOGIN_ACTION_URL": "http://SERVERIP-URI/tera/LauncherLoginAction",
-    "HASH_FILE_URL": "http://SERVERIP-URI/tera/launcher/hash-file.json",
-    "FILE_SERVER_URL": "http://SERVERIP-URI/public",
-    "SERVER_LIST_URL": "http://SERVERIP-URI/tera/ServerList.json?lang=en&sort=3"
+    "LAUNCHER_ACTION_URL": "http://100.100.17.32:8090",
+    "HASH_FILE_URL": "https://www.neolithictera.com/TeraDirect/hash-file.json",
+    "FILE_SERVER_URL": "https://www.neolithictera.com/TeraDirect",
+    "SERVER_LIST_URL": "http://100.100.17.32:8090/tera/ServerList.json?lang=en&sort=3",
+    "SLS_URL": "http://100.100.17.32:8090/tera",
+    "CLIENT_VERSION": "100.02",
+    "LAUNCHER_UPDATE_URL": "https://www.neolithictera.com/TeraDirect/launcher/update-manifest.json"
   }

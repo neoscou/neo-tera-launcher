@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package proto_opuent;
+
+message GetAllServerStatReq {
+    fixed32 server_cat = 1;
+}
+
+message GetAllServerStatAns {
+    repeated ServerInfo server_list = 1;
+    
+    message ServerInfo {
+        fixed32 server_id = 1;
+        fixed32 last_msg = 2;
+        fixed32 ip = 3;
+        fixed32 port = 4;
+    }
+}

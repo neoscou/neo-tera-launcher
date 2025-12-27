@@ -2,9 +2,10 @@ const { invoke } = window.__TAURI__.tauri;
 const { listen } = window.__TAURI__.event;
 const { appWindow } = window.__TAURI__.window;
 const { message } = window.__TAURI__.dialog;
+const { open: shellOpen } = window.__TAURI__.shell;
 
 const REQUIRED_PRIVILEGE_LEVEL = 3;
-const UPDATE_CHECK_ENABLED = false;
+const UPDATE_CHECK_ENABLED = true;
 
 const App = {
   translations: {},
@@ -30,6 +31,14 @@ const App = {
     lastLogTime: 0,
     speedHistory: [],
     speedHistoryMaxLength: 10,
+    displayedSpeed: 0,
+    displayedTimeRemaining: 0,
+    lastDisplayUpdate: 0,
+    displayUpdateInterval: 500, // Update display every 500ms to reduce flickering
+    // Speed calculation based on total bytes delta
+    lastSpeedSampleTime: 0,
+    lastSpeedSampleBytes: 0,
+    calculatedTotalSpeed: 0,
     isUpdateAvailable: false,
     isDownloadComplete: false,
     lastProgressUpdate: null,
@@ -58,6 +67,8 @@ const App = {
     hashFileProgress: 0,
     currentProcessingFile: "",
     processedFiles: 0,
+    isMaintenanceActive: false,
+    maintenanceDetails: null,
   },
 
   /**
@@ -76,7 +87,7 @@ const App = {
    * @param {Object} newState - The new state to update the application with.
    * @param {number} [newState.totalSize] - The total size of the download.
    * @param {number} [newState.totalDownloadedBytes] - The total number of bytes
-   *   downloaded so far.
+   * downloaded so far.
    */
   setState(newState) {
     if (
@@ -124,13 +135,21 @@ const App = {
         this.updateUI();
       });
 
+      listen("maintenance_active", (event) => {
+        console.log("Maintenance active event received:", event.payload);
+        this.showMaintenanceModal(event.payload);
+      });
+
+      // Check for launcher updates first (before anything else)
+      await this.checkLauncherUpdate();
+
       //just for debug
       //localStorage.setItem('isFirstLaunch','true');
 
       if (this.state.isAuthenticated && this.Router.currentRoute === "home") {
         if (!UPDATE_CHECK_ENABLED) {
           console.log(
-            "Updates are disabled, skipping update check and server connection",
+            "Updates are disabled, skipping update check and server connection"
           );
           this.setState({
             isUpdateAvailable: false,
@@ -188,9 +207,9 @@ const App = {
    * Listens for the following events:
    *
    * - `game_status`: emitted when the game status is updated. The event payload is either
-   *   `GAME_STATUS_RUNNING` or `GAME_STATUS_NOT_RUNNING`.
+   * `GAME_STATUS_RUNNING` or `GAME_STATUS_NOT_RUNNING`.
    * - `game_status_changed`: emitted when the game status changes. The event payload is a
-   *   boolean indicating whether the game is running or not.
+   * boolean indicating whether the game is running or not.
    * - `game_ended`: emitted when the game has ended. The event payload is empty.
    *
    * When any of these events are received, the UI is updated to reflect the new game status.
@@ -207,10 +226,17 @@ const App = {
       this.updateUIForGameStatus(isRunning);
     });
 
-    listen("game_ended", () => {
+    listen("game_ended", async () => {
       console.log("Game has ended");
       this.updateUIForGameStatus(false);
       this.toggleModal("log-modal", false);
+
+      try {
+        await appWindow.unminimize();
+        await appWindow.setFocus();
+      } catch (e) {
+        console.error("Failed to unminimize or focus window:", e);
+      }
     });
   },
 
@@ -220,13 +246,13 @@ const App = {
    * Listens for the following events:
    *
    * - `download_progress`: emitted when the download progress is updated. The event payload is a
-   *   DownloadProgress object.
+   * DownloadProgress object.
    * - `file_check_progress`: emitted when the file check progress is updated. The event payload is a
-   *   FileCheckProgress object.
+   * FileCheckProgress object.
    * - `file_check_completed`: emitted when the file check is complete. The event payload is an empty
-   *   object.
+   * object.
    * - `download_complete`: emitted when the download is complete. The event payload is an empty
-   *   object.
+   * object.
    *
    * When any of these events are received, the UI is updated to reflect the new download status.
    */
@@ -240,7 +266,331 @@ const App = {
         currentProgress: 100,
         currentUpdateMode: "complete",
       });
+      this.handleCompletion();
     });
+    
+    // Listen for launcher update progress
+    listen("launcher_update_progress", this.handleLauncherUpdateProgress.bind(this));
+  },
+
+  // ==================== LAUNCHER SELF-UPDATE FUNCTIONS ====================
+
+  /**
+   * Checks if a launcher update is available from the server.
+   * @returns {Promise<Object>} Update info containing update_available, current_version, latest_version, etc.
+   */
+  async checkLauncherUpdate() {
+    try {
+      console.log("Checking for launcher updates...");
+      const updateInfo = await invoke("check_launcher_update");
+      console.log("Launcher update check result:", updateInfo);
+      
+      if (updateInfo.update_available) {
+        // Store update info for later use
+        this.pendingLauncherUpdate = updateInfo;
+        // Show notification banner that update will be applied
+        this.showLauncherUpdateBanner(updateInfo);
+      }
+      
+      return updateInfo;
+    } catch (error) {
+      console.error("Failed to check for launcher updates:", error);
+      return null;
+    }
+  },
+
+  /**
+   * Shows a notification banner that an update is pending and will be applied automatically.
+   * @param {Object} updateInfo - The update information from the server.
+   */
+  showLauncherUpdateBanner(updateInfo) {
+    // Create banner if it doesn't exist
+    let banner = document.getElementById("launcher-update-banner");
+    if (!banner) {
+      banner = document.createElement("div");
+      banner.id = "launcher-update-banner";
+      banner.className = "launcher-update-banner";
+      banner.innerHTML = `
+        <div class="launcher-update-banner-content">
+          <span class="launcher-update-banner-icon">⬆️</span>
+          <span class="launcher-update-banner-text">
+            <span data-translate="LAUNCHER_UPDATE_PENDING">Launcher update available</span>
+            <span id="launcher-update-banner-version"></span>
+          </span>
+          <span class="launcher-update-banner-status" id="launcher-update-banner-status"></span>
+        </div>
+        <div class="launcher-update-banner-progress">
+          <div class="launcher-update-banner-progress-bar" id="launcher-update-banner-progress-bar"></div>
+        </div>
+      `;
+      // Insert at top of body
+      document.body.insertBefore(banner, document.body.firstChild);
+    }
+    
+    // Update version info
+    document.getElementById("launcher-update-banner-version").textContent = 
+      `(${updateInfo.current_version} → ${updateInfo.latest_version})`;
+    document.getElementById("launcher-update-banner-status").textContent = 
+      this.t("WAITING_FOR_FILE_CHECK") || "Waiting for file check...";
+    
+    // Show the banner
+    banner.style.display = "block";
+  },
+
+  /**
+   * Updates the launcher update banner status.
+   * @param {string} status - The status message to display.
+   * @param {number} progress - Optional progress percentage (0-100).
+   */
+  updateLauncherUpdateBannerStatus(status, progress = null) {
+    const statusEl = document.getElementById("launcher-update-banner-status");
+    const progressBar = document.getElementById("launcher-update-banner-progress-bar");
+    
+    if (statusEl) {
+      statusEl.textContent = status;
+    }
+    
+    if (progressBar && progress !== null) {
+      progressBar.style.width = `${progress}%`;
+    }
+  },
+
+  /**
+   * Hides the launcher update banner.
+   */
+  hideLauncherUpdateBanner() {
+    const banner = document.getElementById("launcher-update-banner");
+    if (banner) {
+      banner.style.display = "none";
+    }
+  },
+
+  /**
+   * Automatically applies the pending launcher update.
+   * Called after file verification is complete.
+   */
+  async applyPendingLauncherUpdate() {
+    if (!this.pendingLauncherUpdate) {
+      return;
+    }
+    
+    const updateInfo = this.pendingLauncherUpdate;
+    console.log("Automatically applying pending launcher update:", updateInfo.latest_version);
+    
+    this.updateLauncherUpdateBannerStatus(
+      this.t("DOWNLOADING_UPDATE") || "Downloading update...", 
+      0
+    );
+    
+    try {
+      // Download the update
+      const updatePath = await invoke("download_launcher_update", {
+        downloadUrl: updateInfo.download_url,
+      });
+      
+      console.log("Launcher update downloaded to:", updatePath);
+      this.updateLauncherUpdateBannerStatus(
+        this.t("APPLYING_UPDATE") || "Applying update...", 
+        100
+      );
+      
+      // Brief delay to show the status
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Apply the update (this will close the launcher)
+      await invoke("apply_launcher_update", {
+        updatePath: updatePath,
+      });
+      
+    } catch (error) {
+      console.error("Failed to auto-apply launcher update:", error);
+      this.updateLauncherUpdateBannerStatus(
+        (this.t("UPDATE_FAILED") || "Update failed: ") + error
+      );
+      // Clear pending update on failure
+      this.pendingLauncherUpdate = null;
+    }
+  },
+
+  /**
+   * Shows a modal dialog informing the user about the available launcher update.
+   * @param {Object} updateInfo - The update information from the server.
+   * @deprecated Use showLauncherUpdateBanner instead for automatic updates.
+   */
+  showLauncherUpdateModal(updateInfo) {
+    // Create modal if it doesn't exist
+    let modal = document.getElementById("launcher-update-modal");
+    if (!modal) {
+      modal = document.createElement("div");
+      modal.id = "launcher-update-modal";
+      modal.className = "modal launcher-update-modal";
+      modal.innerHTML = `
+        <div class="modal-content launcher-update-content">
+          <div class="modal-header">
+            <h2 data-translate="LAUNCHER_UPDATE_AVAILABLE">Launcher Update Available</h2>
+          </div>
+          <div class="modal-body">
+            <p class="update-version-info">
+              <span data-translate="CURRENT_VERSION">Current version:</span> <span id="current-launcher-version"></span><br>
+              <span data-translate="NEW_VERSION">New version:</span> <span id="new-launcher-version"></span>
+            </p>
+            <p id="launcher-changelog" class="launcher-changelog"></p>
+            <div id="launcher-update-progress-container" class="launcher-update-progress-container" style="display: none;">
+              <div class="progress-bar-container">
+                <div id="launcher-update-progress-bar" class="progress-bar"></div>
+              </div>
+              <p id="launcher-update-status" class="launcher-update-status"></p>
+            </div>
+          </div>
+          <div class="modal-footer" id="launcher-update-buttons">
+            <button id="launcher-update-later-btn" class="modal-btn secondary" data-translate="UPDATE_LATER">Later</button>
+            <button id="launcher-update-now-btn" class="modal-btn primary" data-translate="UPDATE_NOW">Update Now</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(modal);
+    }
+    
+    // Populate update info
+    document.getElementById("current-launcher-version").textContent = updateInfo.current_version;
+    document.getElementById("new-launcher-version").textContent = updateInfo.latest_version;
+    
+    const changelogEl = document.getElementById("launcher-changelog");
+    if (updateInfo.changelog) {
+      changelogEl.textContent = updateInfo.changelog;
+      changelogEl.style.display = "block";
+    } else {
+      changelogEl.style.display = "none";
+    }
+    
+    // Reset progress container
+    document.getElementById("launcher-update-progress-container").style.display = "none";
+    document.getElementById("launcher-update-buttons").style.display = "flex";
+    
+    // Set up button handlers
+    const updateNowBtn = document.getElementById("launcher-update-now-btn");
+    const updateLaterBtn = document.getElementById("launcher-update-later-btn");
+    
+    updateNowBtn.onclick = () => this.downloadAndApplyLauncherUpdate(updateInfo);
+    
+    if (updateInfo.mandatory) {
+      updateLaterBtn.style.display = "none";
+    } else {
+      updateLaterBtn.style.display = "inline-block";
+      updateLaterBtn.onclick = () => this.hideLauncherUpdateModal();
+    }
+    
+    // Show the modal
+    modal.style.display = "flex";
+  },
+
+  /**
+   * Hides the launcher update modal.
+   */
+  hideLauncherUpdateModal() {
+    const modal = document.getElementById("launcher-update-modal");
+    if (modal) {
+      modal.style.display = "none";
+    }
+  },
+
+  /**
+   * Downloads and applies the launcher update.
+   * @param {Object} updateInfo - The update information containing download_url.
+   */
+  async downloadAndApplyLauncherUpdate(updateInfo) {
+    if (!updateInfo.download_url) {
+      console.error("No download URL provided for launcher update");
+      return;
+    }
+    
+    try {
+      // Show progress UI
+      document.getElementById("launcher-update-progress-container").style.display = "block";
+      document.getElementById("launcher-update-buttons").style.display = "none";
+      document.getElementById("launcher-update-status").textContent = this.t("DOWNLOADING_UPDATE") || "Downloading update...";
+      
+      console.log("Downloading launcher update from:", updateInfo.download_url);
+      
+      // Download the update
+      const updatePath = await invoke("download_launcher_update", {
+        downloadUrl: updateInfo.download_url,
+      });
+      
+      console.log("Launcher update downloaded to:", updatePath);
+      document.getElementById("launcher-update-status").textContent = this.t("APPLYING_UPDATE") || "Applying update...";
+      
+      // Apply the update (this will close the launcher)
+      await invoke("apply_launcher_update", {
+        updatePath: updatePath,
+      });
+      
+    } catch (error) {
+      console.error("Failed to download/apply launcher update:", error);
+      document.getElementById("launcher-update-status").textContent = 
+        (this.t("UPDATE_FAILED") || "Update failed: ") + error;
+      document.getElementById("launcher-update-buttons").style.display = "flex";
+    }
+  },
+
+  /**
+   * Handles launcher update download progress events.
+   * @param {Object} event - The progress event from the backend.
+   */
+  handleLauncherUpdateProgress(event) {
+    if (!event || !event.payload) return;
+    
+    const { progress, downloaded_bytes, total_bytes, speed, status } = event.payload;
+    
+    // Update modal progress bar (if visible)
+    const progressBar = document.getElementById("launcher-update-progress-bar");
+    const statusEl = document.getElementById("launcher-update-status");
+    
+    // Update banner progress bar (for auto-update)
+    const bannerProgressBar = document.getElementById("launcher-update-banner-progress-bar");
+    const bannerStatusEl = document.getElementById("launcher-update-banner-status");
+    
+    let statusText = "";
+    
+    if (status === "downloading") {
+      const downloadedMB = (downloaded_bytes / (1024 * 1024)).toFixed(2);
+      const totalMB = (total_bytes / (1024 * 1024)).toFixed(2);
+      const speedMBs = (speed / (1024 * 1024)).toFixed(2);
+      statusText = `${this.t("DOWNLOADING") || "Downloading"}: ${downloadedMB} MB / ${totalMB} MB (${speedMBs} MB/s)`;
+    } else if (status === "writing") {
+      statusText = this.t("WRITING_UPDATE") || "Writing update file...";
+    } else if (status === "complete") {
+      statusText = this.t("UPDATE_COMPLETE") || "Update complete, restarting...";
+    }
+    
+    // Update modal elements
+    if (progressBar) {
+      progressBar.style.width = `${progress}%`;
+    }
+    if (statusEl) {
+      statusEl.textContent = statusText;
+    }
+    
+    // Update banner elements
+    if (bannerProgressBar) {
+      bannerProgressBar.style.width = `${progress}%`;
+    }
+    if (bannerStatusEl) {
+      bannerStatusEl.textContent = statusText;
+    }
+  },
+
+  /**
+   * Gets the current launcher version from the backend.
+   * @returns {Promise<string>} The current launcher version.
+   */
+  async getLauncherVersion() {
+    try {
+      return await invoke("get_launcher_version");
+    } catch (error) {
+      console.error("Failed to get launcher version:", error);
+      return "unknown";
+    }
   },
 
   /**
@@ -269,12 +619,12 @@ const App = {
     const modal = document.createElement("div");
     modal.id = "first-launch-modal";
     modal.innerHTML = `
-            <div class="first-launch-modal-content">
-                <h2>${this.t("WELCOME_TO_LAUNCHER")}</h2>
-                <p>${this.t("FIRST_LAUNCH_MESSAGE")}</p>
-                <button id="set-game-path-btn">${this.t("SET_GAME_PATH")}</button>
-            </div>
-        `;
+      <div class="first-launch-modal-content">
+        <h2>${this.t("WELCOME_TO_LAUNCHER")}</h2>
+        <p>${this.t("FIRST_LAUNCH_MESSAGE")}</p>
+        <button id="set-game-path-btn">${this.t("SET_GAME_PATH")}</button>
+      </div>
+    `;
     document.body.appendChild(modal);
 
     const setGamePathBtn = document.getElementById("set-game-path-btn");
@@ -361,18 +711,18 @@ const App = {
    * Handles download progress events from the backend.
    * @param {Object} event The event object from the backend.
    * @param {Object} event.payload The payload of the event, containing the following properties:
-   *   - file_name: The name of the file being downloaded.
-   *   - progress: The percentage of the file downloaded.
-   *   - speed: The download speed in bytes per second.
-   *   - downloaded_bytes: The total number of bytes downloaded so far.
-   *   - total_bytes: The total number of bytes to download.
-   *   - total_files: The total number of files to download.
-   *   - current_file_index: The index of the current file in the list of files to download.
+   * - file_name: The name of the file being downloaded.
+   * - progress: The percentage of the file downloaded.
+   * - speed: The download speed in bytes per second.
+   * - downloaded_bytes: The total number of bytes downloaded so far.
+   * - total_bytes: The total number of bytes to download.
+   * - total_files: The total number of files to download.
+   * - current_file_index: The index of the current file in the list of files to download.
    */
   handleDownloadProgress(event) {
     if (!event || !event.payload) {
       console.error(
-        "Invalid event or payload received in handleDownloadProgress",
+        "Invalid event or payload received in handleDownloadProgress"
       );
       return;
     }
@@ -397,11 +747,15 @@ const App = {
     // Update total downloaded bytes
     const totalDownloadedBytes = downloaded_bytes;
 
-    // Calculate global remaining time using totalDownloadedBytes
+    // Calculate total speed based on bytes delta over time (not averaging individual file speeds)
+    const now = Date.now();
+    const totalSpeed = this.calculateTotalSpeed(totalDownloadedBytes, now);
+
+    // Calculate global remaining time using totalDownloadedBytes and total speed
     const timeRemaining = this.calculateGlobalTimeRemaining(
       totalDownloadedBytes,
       this.state.totalSize,
-      speed,
+      totalSpeed
     );
 
     console.log("Calculated download progress:", {
@@ -413,7 +767,7 @@ const App = {
     this.setState({
       currentFileName: file_name,
       currentProgress: Math.min(100, progress),
-      currentSpeed: speed,
+      currentSpeed: totalSpeed, // Use calculated total speed instead of individual file speed
       downloadedSize: downloaded_bytes,
       totalSize: total_bytes,
       totalFiles: total_files,
@@ -432,15 +786,15 @@ const App = {
    * Handles file check progress events from the backend.
    * @param {Object} event The event object from the backend.
    * @param {Object} event.payload The payload of the event, containing the following properties:
-   *   - current_file: The name of the file being checked.
-   *   - progress: The percentage of the file check completed.
-   *   - current_count: The number of files checked so far.
-   *   - total_files: The total number of files to check.
+   * - current_file: The name of the file being checked.
+   * - progress: The percentage of the file check completed.
+   * - current_count: The number of files checked so far.
+   * - total_files: The total number of files to check.
    */
   handleFileCheckProgress(event) {
     if (!event || !event.payload) {
       console.error(
-        "Invalid event or payload received in file_check_progress listener",
+        "Invalid event or payload received in file_check_progress listener"
       );
       return;
     }
@@ -462,10 +816,10 @@ const App = {
    * Handles file check completed events from the backend.
    * @param {Object} event The event object from the backend.
    * @param {Object} event.payload The payload of the event, containing the following properties:
-   *   - total_files: The total number of files to check.
-   *   - files_to_update: The number of files that require an update.
-   *   - total_time_seconds: The total time taken to check all the files in seconds.
-   *   - average_time_per_file_ms: The average time taken to check each file in milliseconds.
+   * - total_files: The total number of files to check.
+   * - files_to_update: The number of files that require an update.
+   * - total_time_seconds: The total time taken to check all the files in seconds.
+   * - average_time_per_file_ms: The average time taken to check each file in milliseconds.
    */
   handleFileCheckCompleted(event) {
     const {
@@ -516,7 +870,6 @@ const App = {
   updateUIElements() {
     const elements = {
       statusString: document.getElementById("status-string"),
-      currentFile: document.getElementById("current-file"),
       filesProgress: document.getElementById("files-progress"),
       downloadedSize: document.getElementById("downloaded-size"),
       totalSize: document.getElementById("total-size"),
@@ -536,7 +889,6 @@ const App = {
         elements.progressPercentageDiv.style.width = "100%";
 
       // Hide unnecessary elements
-      if (elements.currentFile) elements.currentFile.style.display = "none";
       if (elements.filesProgress) elements.filesProgress.style.display = "none";
       if (elements.downloadedSize && elements.downloadedSize.parentElement)
         elements.downloadedSize.parentElement.style.display = "none";
@@ -566,12 +918,11 @@ const App = {
   /**
    * Updates the text content of the elements in the object with the relevant text from the state.
    * @param {Object} elements - An object containing the elements to be updated. Can contain the following properties:
-   *      dlStatusString: The element to display the download status string.
-   *      statusString: The element to display the status string.
-   *      currentFile: The element to display the current file name.
-   *      filesProgress: The element to display the progress of the file check (e.g. 10/100).
-   *      downloadedSize: The element to display the downloaded size.
-   *      totalSize: The element to display the total size.
+   *   dlStatusString: The element to display the download status string.
+   *   statusString: The element to display the status string.
+   *   filesProgress: The element to display the progress of the file check (e.g. 10/100).
+   *   downloadedSize: The element to display the downloaded size.
+   *   totalSize: The element to display the total size.
    */
   updateTextContents(elements) {
     if (elements.dlStatusString) {
@@ -579,15 +930,11 @@ const App = {
     }
     if (elements.statusString)
       elements.statusString.textContent = this.getStatusText();
-    if (elements.currentFile)
-      elements.currentFile.textContent = this.getFileName(
-        this.state.currentFileName,
-      );
     if (elements.filesProgress)
       elements.filesProgress.textContent = `(${this.state.currentFileIndex}/${this.state.totalFiles})`;
     if (elements.downloadedSize)
       elements.downloadedSize.textContent = this.formatSize(
-        this.state.downloadedSize,
+        this.state.downloadedSize
       );
     if (elements.totalSize)
       elements.totalSize.textContent = this.formatSize(this.state.totalSize);
@@ -596,53 +943,57 @@ const App = {
   /**
    * Updates the progress bar elements in the object with the relevant progress.
    * @param {Object} elements - An object containing the elements to be updated. Can contain the following properties:
-   *      progressPercentage: The element to display the progress percentage.
-   *      progressPercentageDiv: The element to display the progress bar itself.
-   *      currentFile: The element to display the current file name.
+   *   progressPercentage: The element to display the progress percentage.
+   *   progressPercentageDiv: The element to display the progress bar itself.
    */
   updateProgressBar(elements) {
     const progress = Math.min(100, this.calculateProgress());
     if (elements.progressPercentage) {
       if (this.state.currentUpdateMode === "ready") {
         elements.progressPercentage.style.display = "none";
-        elements.currentFile.style.display = "none";
       } else {
         elements.progressPercentage.style.display = "inline";
         elements.progressPercentage.textContent = `(${Math.round(progress)}%)`;
-        elements.currentFile.style.display = "flex !important";
       }
     }
     if (elements.progressPercentageDiv) {
-      if (this.state.currentUpdateMode === "ready") {
-        elements.currentFile.style.display = "none";
-      } else {
-        elements.progressPercentageDiv.style.width = `${progress}%`;
-        elements.currentFile.style.display = "flex !important";
-      }
+      elements.progressPercentageDiv.style.width = `${progress}%`;
     }
   },
 
   /**
    * Updates the download info elements in the object with the relevant download information.
    * @param {Object} elements - An object containing the elements to be updated. Can contain the following properties:
-   *      downloadSpeed: The element to display the download speed.
-   *      timeRemaining: The element to display the time remaining.
+   *   downloadSpeed: The element to display the download speed.
+   *   timeRemaining: The element to display the time remaining.
    */
   updateDownloadInfo(elements) {
     console.log("Current update mode:", this.state.currentUpdateMode);
     console.log("Current speed:", this.state.currentSpeed);
     console.log("Time remaining:", this.state.timeRemaining);
 
+    // Throttle display updates to reduce flickering from concurrent downloads
+    const now = Date.now();
+    const timeSinceLastUpdate = now - this.state.lastDisplayUpdate;
+    
+    if (timeSinceLastUpdate >= this.state.displayUpdateInterval) {
+      // Calculate smoothed speed using the average from speed history
+      const smoothedSpeed = this.getSmoothedSpeed();
+      this.state.displayedSpeed = smoothedSpeed;
+      this.state.displayedTimeRemaining = this.state.timeRemaining;
+      this.state.lastDisplayUpdate = now;
+    }
+
     if (elements.downloadSpeed) {
       const speedText =
         this.state.currentUpdateMode === "download"
-          ? this.formatSpeed(this.state.currentSpeed)
+          ? this.formatSpeed(this.state.displayedSpeed)
           : "";
       console.log("Formatted speed:", speedText);
       elements.downloadSpeed.textContent = speedText;
       console.log(
         "Download speed element updated:",
-        elements.downloadSpeed.textContent,
+        elements.downloadSpeed.textContent
       );
     } else {
       console.log("Download speed element not found");
@@ -650,13 +1001,13 @@ const App = {
     if (elements.timeRemaining) {
       const timeText =
         this.state.currentUpdateMode === "download"
-          ? this.formatTime(this.state.timeRemaining)
+          ? this.formatTime(this.state.displayedTimeRemaining)
           : "";
       console.log("Formatted time:", timeText);
       elements.timeRemaining.textContent = timeText;
       console.log(
         "Time remaining element updated:",
-        elements.timeRemaining.textContent,
+        elements.timeRemaining.textContent
       );
     } else {
       console.log("Time remaining element not found");
@@ -666,13 +1017,13 @@ const App = {
   /**
    * Returns the current download status string based on the current update mode.
    * This function will return the following strings based on the current update mode:
-   *      'file_check': 'VERIFYING_FILES'
-   *      'download': 'DOWNLOADING_FILES'
-   *      'complete': If the file check is complete and there is no update available, 'NO_UPDATE_REQUIRED'
-   *                  If the file check is complete and there is an update available, 'FILE_CHECK_COMPLETE'
-   *                  If the download is complete, 'DOWNLOAD_COMPLETE'
-   *                  If the update is complete, 'UPDATE_COMPLETED'
-   *      default: 'GAME_READY_TO_LAUNCH'
+   *   'file_check': 'VERIFYING_FILES'
+   *   'download': 'DOWNLOADING_FILES'
+   *   'complete': If the file check is complete and there is no update available, 'NO_UPDATE_REQUIRED'
+   *         If the file check is complete and there is an update available, 'FILE_CHECK_COMPLETE'
+   *         If the download is complete, 'DOWNLOAD_COMPLETE'
+   *         If the update is complete, 'UPDATE_COMPLETED'
+   *   default: 'GAME_READY_TO_LAUNCH'
    *
    * @returns {string} The current download status string
    */
@@ -735,7 +1086,7 @@ const App = {
     return this.t(
       this.state.currentUpdateMode === "file_check"
         ? "VERIFYING_FILES"
-        : "DOWNLOADING_FILES",
+        : "DOWNLOADING_FILES"
     );
   },
 
@@ -813,6 +1164,11 @@ const App = {
       hashFileProgress: 0,
       currentProcessingFile: "",
       processedFiles: 0,
+      // Reset speed calculation tracking
+      speedHistory: [],
+      lastSpeedSampleTime: 0,
+      lastSpeedSampleBytes: 0,
+      calculatedTotalSpeed: 0,
     });
   },
 
@@ -820,13 +1176,26 @@ const App = {
    * Handles download completion events from the backend.
    * Sets the state to indicate that the download is complete, and after a 2 second delay, sets the state to indicate that the update is complete.
    * Also re-enables the game launch button and language selector.
+   * If there's a pending launcher update, it will be applied automatically.
    */
   handleCompletion() {
     this.setState({
       isDownloadComplete: true,
+      isUpdateAvailable: false,
       currentProgress: 100,
       currentUpdateMode: "complete",
     });
+    
+    // Check if there's a pending launcher update to apply
+    if (this.pendingLauncherUpdate) {
+      console.log("File check complete, applying pending launcher update...");
+      // Apply the launcher update after a brief delay
+      setTimeout(() => {
+        this.applyPendingLauncherUpdate();
+      }, 1000);
+      return; // Don't proceed with normal completion flow
+    }
+    
     setTimeout(() => {
       this.setState({
         isUpdateComplete: true,
@@ -866,7 +1235,7 @@ const App = {
       console.log(
         isLogin
           ? "Update check already performed after login"
-          : "Update check already performed on refresh",
+          : "Update check already performed on refresh"
       );
       return;
     }
@@ -888,6 +1257,51 @@ const App = {
     } catch (error) {
       console.error("Error during initialization and update check:", error);
       // Handle the error (e.g., display a message to the user)
+    }
+  },
+
+  /**
+   * Handles the Check/Repair button click.
+   * This manually triggers the file verification process.
+   */
+  async handleCheckRepair() {
+    if (this.state.isCheckingForUpdates || this.state.isGameRunning) {
+      console.log("Cannot check/repair: update in progress or game running");
+      return;
+    }
+
+    console.log("Check/Repair button clicked - starting file verification");
+    
+    // Add visual feedback
+    if (this.checkRepairBtn) {
+      this.checkRepairBtn.classList.add("checking");
+      this.checkRepairBtn.classList.add("disabled");
+    }
+
+    try {
+      // Run the same update check process
+      await this.checkForUpdates();
+    } catch (error) {
+      console.error("Error during check/repair:", error);
+      this.showErrorMessage("Error checking files: " + error.message);
+    } finally {
+      // Remove visual feedback
+      if (this.checkRepairBtn) {
+        this.checkRepairBtn.classList.remove("checking");
+        this.checkRepairBtn.classList.remove("disabled");
+      }
+    }
+  },
+
+  /**
+   * Launches TeraToolbox from the game's Binaries folder.
+   */
+  async launchToolbox() {
+    try {
+      await invoke("launch_toolbox");
+    } catch (error) {
+      console.error("Failed to launch Toolbox:", error);
+      this.showErrorMessage("Failed to launch Toolbox: " + error);
     }
   },
 
@@ -949,7 +1363,7 @@ const App = {
           totalFiles: filesToUpdate.length,
           totalSize: filesToUpdate.reduce(
             (total, file) => total + file.size,
-            0,
+            0
           ),
         });
         setTimeout(async () => {
@@ -1061,41 +1475,56 @@ const App = {
    * @return {Promise<void>}
    */
   async login(username, password) {
+    // Prevent multiple simultaneous login attempts
     if (this.state.isLoggingIn) {
       console.log("A login attempt is already in progress.");
       return;
     }
 
+    // Set state to "logging in"
     this.setState({ isLoggingIn: true });
     const loginButton = document.getElementById("login-button");
     const loginErrorMsg = document.getElementById("login-error-msg");
 
+    // Disable login button and show "in progress" text
     if (loginButton) {
       loginButton.disabled = true;
       loginButton.textContent = this.t("LOGIN_IN_PROGRESS");
     }
 
+    // Hide the error message field before starting
     if (loginErrorMsg) {
-      loginErrorMsg.style.display = "none";
-      loginErrorMsg.style.opacity = 0;
+      loginErrorMsg.classList.remove("active");
     }
 
     try {
+      // Call the Rust backend 'login' command
       console.log("invoke login from backend");
       const response = await invoke("login", { username, password });
+
+      // If invoke() succeeds, Rust returned Ok(string), so parse it.
       const jsonResponse = JSON.parse(response);
 
+      if (jsonResponse && jsonResponse.Banned) {
+        // If 'Banned' is true, throw an error to stop the login process.
+        // The 'catch' block below will handle displaying it.
+        throw new Error("ACCOUNT_BANNED");
+      }
+
+      // Check if the API response indicates a successful login
       if (
         jsonResponse &&
         jsonResponse.Return &&
         jsonResponse.Msg === "success"
       ) {
+        // Store auth info received from the backend
         this.storeAuthInfo(jsonResponse);
         console.log("Login success");
 
+        // If update checks are disabled, skip to home screen
         if (!UPDATE_CHECK_ENABLED) {
           console.log(
-            "Updates are disabled, skipping update check and server connection",
+            "Updates are disabled, skipping update check and server connection"
           );
           this.setState({
             isUpdateAvailable: false,
@@ -1111,27 +1540,68 @@ const App = {
         // Check server connection after successful login
         const isConnected = await this.checkServerConnection();
         if (isConnected) {
+          // If connected, proceed to check for game updates
           console.log("Login success 2");
           await this.initializeAndCheckUpdates(true);
           await this.Router.navigate("home");
         } else {
+          // If login was ok but file server is down
           throw new Error(this.t("SERVER_CONNECTION_ERROR"));
         }
       } else {
+        // Handle cases where the API call was successful (200 OK)
+        // but the business logic failed (e.g., "Return: false")
         const errorMessage = jsonResponse
           ? jsonResponse.Msg || this.t("LOGIN_ERROR")
           : this.t("LOGIN_ERROR");
         throw new Error(errorMessage);
       }
     } catch (error) {
+      // --- FIXED ERROR HANDLING ---
+      // This block catches:
+      // 1. Rust Err(string) -> `error` is a string.
+      // 2. JavaScript `throw new Error(...)` -> `error` is an object.
+      // 3. Network/parsing errors.
+
       console.error("Error during login:", error);
-      if (loginErrorMsg) {
-        loginErrorMsg.textContent =
-          error.message || this.t("SERVER_CONNECTION_ERROR");
-        loginErrorMsg.style.display = "flex";
-        loginErrorMsg.style.opacity = 1;
+
+      // Determine the actual error message
+      let errorMessage = this.t("SERVER_CONNECTION_ERROR"); // Default fallback
+
+      if (typeof error === "string") {
+        // This is a direct error string from Rust (e.g., "Invalid login or password")
+        errorMessage = error;
+      } else if (error && error.message) {
+        // This is a standard JavaScript Error object
+        errorMessage = error.message;
       }
+
+      // Now, display the correct message
+      if (loginErrorMsg) {
+        // --- Optional: Map specific errors to translation keys ---
+        if (errorMessage === "Invalid login or password") {
+          // If you have a translation key for this, use it.
+          // If not, just let 'errorMessage' be the raw string.
+          loginErrorMsg.textContent = this.t("LOGIN_ERROR") || errorMessage;
+
+          // Here you could also show a specific UI element, e.g.
+          // document.getElementById("password-error-placeholder").style.display = 'block';
+        } else if (errorMessage === "ACCOUNT_BANNED") {
+          loginErrorMsg.textContent =
+            this.t("ACCOUNT_BANNED") ||
+            "Account blocked. Please contact support.";
+        } else {
+          // For all other errors (real connection issues, etc.)
+          loginErrorMsg.textContent = this.t("SERVER_CONNECTION_ERROR");
+        }
+
+        // Show the error message
+        loginErrorMsg.classList.add("active");
+      }
+      // --- END FIXED ERROR HANDLING ---
     } finally {
+      // This block always runs, whether login succeeded or failed
+      // Re-enable the login button and reset its text
       this.setState({ isLoggingIn: false });
       if (loginButton) {
         loginButton.disabled = false;
@@ -1157,16 +1627,22 @@ const App = {
     localStorage.setItem("userNo", jsonResponse.UserNo.toString());
     localStorage.setItem(
       "characterCount",
-      jsonResponse.CharacterCount.toString(),
+      jsonResponse.CharacterCount.toString()
     );
     localStorage.setItem("permission", jsonResponse.Permission.toString());
     localStorage.setItem("privilege", jsonResponse.Privilege.toString());
+    localStorage.setItem("banned", jsonResponse.Banned.toString());
+
+    if (jsonResponse.session_cookie) {
+      localStorage.setItem("sessionCookie", jsonResponse.session_cookie);
+    }
 
     invoke("set_auth_info", {
       authKey: jsonResponse.AuthKey,
       userName: jsonResponse.UserName,
       userNo: jsonResponse.UserNo,
       characterCount: jsonResponse.CharacterCount,
+      sessionCookie: jsonResponse.session_cookie,
     });
 
     this.checkAuthentication();
@@ -1226,6 +1702,13 @@ const App = {
       localStorage.removeItem("characterCount");
       localStorage.removeItem("permission");
       localStorage.removeItem("privilege");
+      localStorage.removeItem("banned");
+      localStorage.removeItem("sessionCookie");
+
+      const generateHashFileBtn = document.getElementById("generate-hash-file");
+      if (generateHashFileBtn) {
+        generateHashFileBtn.style.display = "none";
+      }
 
       this.setState({
         updateCheckPerformed: false,
@@ -1247,7 +1730,7 @@ const App = {
    * updates the UI to reflect the new language.
    *
    * @param {string} newLang - The new language to use. Must be one of the
-   *     keys in the languages object.
+   *  keys in the languages object.
    *
    * @returns {Promise<void>}
    */
@@ -1290,7 +1773,7 @@ const App = {
       this.statusEl.textContent = this.t(
         this.state.isGameRunning
           ? "GAME_STATUS_RUNNING"
-          : "GAME_STATUS_NOT_RUNNING",
+          : "GAME_STATUS_NOT_RUNNING"
       );
     }
     if (this.launchGameBtn) {
@@ -1306,7 +1789,7 @@ const App = {
    * able to select a language.
    *
    * @param {boolean} enable If true, the language selector will be enabled.
-   *                          If false, the language selector will be disabled.
+   *             If false, the language selector will be disabled.
    * @returns {void}
    */
   toggleLanguageSelector(enable) {
@@ -1336,9 +1819,40 @@ const App = {
    * @returns {void}
    */
   async handleLaunchGame() {
+    try {
+      // Step 1: Invoke the new Rust command to get fresh account data
+      console.log("Re-checking account status...");
+      const rawResponse = await invoke("get_fresh_account_info");
+      const freshInfo = JSON.parse(rawResponse);
+
+      // Step 2: Update *all* our stored data
+      // This syncs both localStorage AND Rust’s GLOBAL_AUTH_INFO with the new AuthKey
+      this.storeAuthInfo(freshInfo);
+
+      // Step 3: Check the updated ban status
+      if (freshInfo.Banned) {
+        console.log("Game launch blocked: Account is banned (fresh check).");
+        this.showErrorModal(
+          this.t("ERROR"),
+          this.t("ACCOUNT_BANNED") || "This account is banned."
+        );
+        return; // Stop the launch
+      }
+      console.log("Account status OK.");
+    } catch (error) {
+      // This can fail if the session expired on the server
+      console.error("Failed to get fresh account info:", error);
+      this.showErrorModal(
+        this.t("ERROR"),
+        this.t("SERVER_CONNECTION_ERROR") ||
+          "Session expired. Please log out and log back in."
+      );
+      return; // Stop the launch
+    }
+
     if (UPDATE_CHECK_ENABLED && this.state.isUpdateAvailable) {
       console.log(
-        "Updates are available, please update before launching the game",
+        "Updates are available, please update before launching the game"
       );
 
       return;
@@ -1350,6 +1864,34 @@ const App = {
 
     this.setState({ isGameLaunching: true });
 
+    let isMaintenance = false;
+    try {
+      // Calls the Rust command that checks the server status and emits the 'maintenance_active' event if true.
+      isMaintenance = await invoke("check_maintenance_and_notify");
+    } catch (e) {
+      // Connection error or other issue during the check.
+      console.error("Error checking maintenance status:", e);
+      this.setState({ isGameLaunching: false });
+      this.updateUIForGameStatus(false);
+      // Use a translated or fallback message if the check fails
+      this.showErrorModal(this.t("ERROR"), this.t("SERVER_CONNECTION_ERROR"));
+      return;
+    }
+
+    if (isMaintenance) {
+      console.log("Game launch blocked: Server is in maintenance.");
+      this.setState({ isGameLaunching: false });
+      // The 'maintenance_active' listener already handled showing the modal.
+      return;
+    }
+
+    try {
+      await appWindow.minimize();
+    } catch (e) {
+      console.error("Failed to minimize window:", e);
+      // A failed minimization shouldn't block the game launch, but it will be logged.
+    }
+
     try {
       this.updateUIForGameStatus(true);
       if (this.statusEl) this.statusEl.textContent = this.t("LAUNCHING_GAME");
@@ -1359,32 +1901,38 @@ const App = {
       console.log("Creating log modal");
       this.createLogModal();
 
-      console.log("Attempting to show log modal");
-      this.toggleModal("log-modal", true);
-
-      // Check if the modal is visible
-      const logModal = document.getElementById("log-modal");
-      if (logModal) {
-        console.log("Log modal display style:", logModal.style.display);
-      } else {
-        console.log("Log modal element not found");
-      }
-
       const result = await invoke("handle_launch_game");
       console.log("Game launch result:", result);
     } catch (error) {
       console.error("Error initiating game launch:", error);
       const game_launch_error = this.t("GAME_LAUNCH_ERROR") + error.toString();
 
-      await message(game_launch_error, {
-        title: this.t("ERROR"),
-        type: "error",
-      });
-      if (this.statusEl)
-        this.statusEl.textContent = this.t(
-          "GAME_LAUNCH_ERROR",
-          error.toString(),
-        );
+      // Specific handling for maintenance errors.
+      // Even though it was already checked earlier, this remains in case the server enters maintenance
+      // between the initial check and the final launch request.
+      if (error.toString().includes("MAINTENANCE_ACTIVE")) {
+        console.log("Launch blocked by MAINTENANCE_ACTIVE error from backend.");
+        // Restore (unminimize) the window if it was minimized right before the backend threw the error.
+        try {
+          await appWindow.unminimize();
+          await appWindow.setFocus();
+        } catch (e) {
+          console.error(
+            "Failed to unminimize or focus window after maintenance error:",
+            e
+          );
+        }
+      } else {
+        // Real game launch error (e.g., missing file, internal game error)
+        this.showErrorModal(this.t("ERROR"), game_launch_error);
+
+        if (this.statusEl)
+          this.statusEl.textContent = this.t(
+            "GAME_LAUNCH_ERROR",
+            error.toString()
+          );
+      }
+
       await invoke("reset_launch_state");
       this.updateUIForGameStatus(false);
       this.setState({ gameExecutionFailed: true });
@@ -1460,7 +2008,7 @@ const App = {
   updateHashFileProgressUI() {
     const modal = document.getElementById("hash-file-progress-modal");
     if (!modal || modal.style.display === "none") {
-      return; // Ne pas mettre à jour si le modal n'est pas visible
+      return; // Do not update if the modal is not visible
     }
 
     const progressBar = modal.querySelector(".hash-progress-bar");
@@ -1479,10 +2027,12 @@ const App = {
 
     if (progressTextEl) {
       const progressText = this.t("PROGRESS_TEXT");
-      progressTextEl.textContent = `${progressText} ${this.state.processedFiles}/${this.state.totalFiles} (${this.state.hashFileProgress.toFixed(2)}%)`;
+      progressTextEl.textContent = `${progressText} ${
+        this.state.processedFiles
+      }/${this.state.totalFiles} (${this.state.hashFileProgress.toFixed(2)}%)`;
     }
 
-    // Mettre à jour le titre du modal si nécessaire
+    // Update the modal title if necessary
     const modalTitle = modal.querySelector("h2");
     if (modalTitle) {
       modalTitle.textContent = this.t("GENERATING_HASH_FILE");
@@ -1604,17 +2154,67 @@ const App = {
     return Math.min(secondsRemaining, 30 * 24 * 60 * 60); // Limit to 30 days maximum
   },
 
-  // Updated calculateAverageSpeed method
-  calculateAverageSpeed(currentSpeed) {
-    // Add current speed to history
-    this.state.speedHistory.push(currentSpeed);
-
-    // Limit history size
-    if (this.state.speedHistory.length > this.state.speedHistoryMaxLength) {
-      this.state.speedHistory.shift(); // Remove oldest value
+  /**
+   * Calculates the total download speed based on the delta of bytes downloaded over time.
+   * This gives accurate total bandwidth usage across all concurrent downloads.
+   * @param {number} currentTotalBytes - The current total bytes downloaded
+   * @param {number} currentTime - The current timestamp in milliseconds
+   * @returns {number} the calculated speed in bytes per second
+   * @memberof App
+   */
+  calculateTotalSpeed(currentTotalBytes, currentTime) {
+    // Initialize on first call
+    if (this.state.lastSpeedSampleTime === 0 || this.state.lastSpeedSampleBytes === 0) {
+      this.state.lastSpeedSampleTime = currentTime;
+      this.state.lastSpeedSampleBytes = currentTotalBytes;
+      return 0;
     }
 
-    // Calculate average speed
+    const elapsedMs = currentTime - this.state.lastSpeedSampleTime;
+    
+    // Only calculate if enough time has passed (at least 100ms to avoid division issues)
+    if (elapsedMs < 100) {
+      return this.state.calculatedTotalSpeed || 0;
+    }
+
+    const bytesDelta = currentTotalBytes - this.state.lastSpeedSampleBytes;
+    const elapsedSeconds = elapsedMs / 1000;
+    
+    // Calculate instantaneous speed
+    const instantSpeed = bytesDelta > 0 ? bytesDelta / elapsedSeconds : 0;
+    
+    // Add to history for smoothing
+    this.state.speedHistory.push(instantSpeed);
+    if (this.state.speedHistory.length > this.state.speedHistoryMaxLength) {
+      this.state.speedHistory.shift();
+    }
+    
+    // Calculate smoothed speed (average of history)
+    const sum = this.state.speedHistory.reduce((acc, speed) => acc + speed, 0);
+    const smoothedSpeed = sum / this.state.speedHistory.length;
+    
+    // Update sample tracking
+    this.state.lastSpeedSampleTime = currentTime;
+    this.state.lastSpeedSampleBytes = currentTotalBytes;
+    this.state.calculatedTotalSpeed = smoothedSpeed;
+    
+    console.log("Speed calculation:", {
+      bytesDelta,
+      elapsedMs,
+      instantSpeed: this.formatSpeed(instantSpeed),
+      smoothedSpeed: this.formatSpeed(smoothedSpeed),
+      historyLength: this.state.speedHistory.length
+    });
+    
+    return smoothedSpeed;
+  },
+
+  // Updated calculateAverageSpeed method - now uses total speed from history
+  calculateAverageSpeed(currentSpeed) {
+    // Use the already calculated total speed from history
+    if (this.state.speedHistory.length === 0) {
+      return currentSpeed;
+    }
     const sum = this.state.speedHistory.reduce((acc, speed) => acc + speed, 0);
     const averageSpeed = sum / this.state.speedHistory.length;
 
@@ -1622,6 +2222,20 @@ const App = {
     console.log("Average speed:", averageSpeed);
 
     return averageSpeed;
+  },
+
+  /**
+   * Returns the smoothed speed for display purposes.
+   * Uses the calculated total speed which is already smoothed.
+   * @returns {number} the smoothed speed in bytes per second
+   * @memberof App
+   */
+  getSmoothedSpeed() {
+    // Return the already calculated and smoothed total speed
+    if (this.state.calculatedTotalSpeed > 0) {
+      return this.state.calculatedTotalSpeed;
+    }
+    return this.state.currentSpeed || 0;
   },
 
   /**
@@ -1728,7 +2342,7 @@ const App = {
 
     console.log(
       `Modal ${modalId} visibility:`,
-      modal.classList.contains("show"),
+      modal.classList.contains("show")
     );
   },
 
@@ -1799,7 +2413,7 @@ const App = {
 
     console.log(
       `Hash progress modal visibility:`,
-      modal.classList.contains("show"),
+      modal.classList.contains("show")
     );
   },
 
@@ -1870,7 +2484,7 @@ const App = {
           y: 0,
           display: "block",
           ease: "power2.out",
-        },
+        }
       );
 
       // Hide the notification after 5 seconds
@@ -2044,6 +2658,240 @@ const App = {
         await this.login(username, password);
       });
     }
+
+    // Create Account link handler - navigates to signup page
+    const createAccountLink = document.getElementById("create-account-link");
+    if (createAccountLink) {
+      createAccountLink.addEventListener("click", async (e) => {
+        e.preventDefault();
+        await this.Router.navigate("signup");
+      });
+    }
+  },
+
+  /**
+   * Initializes the signup page by adding event listeners for registration.
+   * @returns {void}
+   */
+  initSignup() {
+    console.log("Initializing signup page");
+    const signupButton = document.getElementById("signup-button");
+    const backToLoginLink = document.getElementById("back-to-login-link");
+    const signupErrorMsg = document.getElementById("signup-error-msg");
+    const signupSuccessMsg = document.getElementById("signup-success-msg");
+
+    if (signupButton) {
+      signupButton.addEventListener("click", async () => {
+        console.log("Signup button clicked");
+        
+        const username = document.getElementById("signup-username").value.trim();
+        const email = document.getElementById("signup-email").value.trim();
+        const password = document.getElementById("signup-password").value;
+        const confirmPassword = document.getElementById("signup-confirm-password").value;
+
+        // Hide previous messages
+        if (signupErrorMsg) signupErrorMsg.classList.remove("active");
+        if (signupSuccessMsg) signupSuccessMsg.classList.remove("active");
+
+        // Client-side validation
+        if (!username || !email || !password || !confirmPassword) {
+          this.showSignupError(this.t("SIGNUP_ALL_FIELDS_REQUIRED"));
+          return;
+        }
+
+        if (username.length < 3 || username.length > 24) {
+          this.showSignupError(this.t("SIGNUP_USERNAME_LENGTH"));
+          return;
+        }
+
+        if (!/^[a-zA-Z0-9]+$/.test(username)) {
+          this.showSignupError(this.t("SIGNUP_USERNAME_ALPHANUMERIC"));
+          return;
+        }
+
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+          this.showSignupError(this.t("SIGNUP_INVALID_EMAIL"));
+          return;
+        }
+
+        if (password.length < 8 || password.length > 128) {
+          this.showSignupError(this.t("SIGNUP_PASSWORD_LENGTH"));
+          return;
+        }
+
+        if (password !== confirmPassword) {
+          this.showSignupError(this.t("SIGNUP_PASSWORD_MISMATCH"));
+          return;
+        }
+
+        // Disable button during registration
+        signupButton.disabled = true;
+        signupButton.textContent = this.t("SIGNUP_IN_PROGRESS");
+
+        try {
+          const response = await invoke("register", { username, email, password });
+          const jsonResponse = JSON.parse(response);
+
+          if (jsonResponse && jsonResponse.Return && jsonResponse.Msg === "success") {
+            // Check if this is email verification mode (account not created yet, need to verify)
+            // The API returns success for both cases, but if email verification is enabled,
+            // the account won't be in the database yet - we need to go to verify page
+            // We'll show a success message and redirect to verification page
+            this.showSignupSuccess(this.t("VERIFY_EMAIL_SENT"));
+            // Wait 2 seconds then redirect to verification page
+            setTimeout(async () => {
+              await this.Router.navigate("signup-verify");
+            }, 2000);
+          } else {
+            // Handle specific error messages from API
+            const errorMsg = jsonResponse.Msg || this.t("SIGNUP_ERROR");
+            this.showSignupError(errorMsg);
+          }
+        } catch (error) {
+          console.error("Registration failed:", error);
+          this.showSignupError(error.toString());
+        } finally {
+          signupButton.disabled = false;
+          signupButton.innerHTML = `<a class="login2" data-translate="SIGNUP_BUTTON">${this.t("SIGNUP_BUTTON")}</a>`;
+        }
+      });
+    }
+
+    // Back to login link handler
+    if (backToLoginLink) {
+      backToLoginLink.addEventListener("click", async (e) => {
+        e.preventDefault();
+        await this.Router.navigate("login");
+      });
+    }
+  },
+
+  /**
+   * Shows an error message on the signup form.
+   * @param {string} message - The error message to display.
+   */
+  showSignupError(message) {
+    const signupErrorMsg = document.getElementById("signup-error-msg");
+    const signupSuccessMsg = document.getElementById("signup-success-msg");
+    if (signupSuccessMsg) signupSuccessMsg.classList.remove("active");
+    if (signupErrorMsg) {
+      signupErrorMsg.textContent = message;
+      signupErrorMsg.classList.add("active");
+    }
+  },
+
+  /**
+   * Shows a success message on the signup form.
+   * @param {string} message - The success message to display.
+   */
+  showSignupSuccess(message) {
+    const signupErrorMsg = document.getElementById("signup-error-msg");
+    const signupSuccessMsg = document.getElementById("signup-success-msg");
+    if (signupErrorMsg) signupErrorMsg.classList.remove("active");
+    if (signupSuccessMsg) {
+      signupSuccessMsg.textContent = message;
+      signupSuccessMsg.classList.add("active");
+    }
+  },
+
+  /**
+   * Initializes the signup verification page for email verification.
+   * @returns {void}
+   */
+  initSignupVerify() {
+    console.log("Initializing signup verify page");
+    const verifyButton = document.getElementById("verify-button");
+    const backToSignupLink = document.getElementById("back-to-signup-link");
+    const verifyErrorMsg = document.getElementById("verify-error-msg");
+    const verifySuccessMsg = document.getElementById("verify-success-msg");
+
+    if (verifyButton) {
+      verifyButton.addEventListener("click", async () => {
+        console.log("Verify button clicked");
+        
+        const code = document.getElementById("verify-code").value.trim().toUpperCase();
+
+        // Hide previous messages
+        if (verifyErrorMsg) verifyErrorMsg.classList.remove("active");
+        if (verifySuccessMsg) verifySuccessMsg.classList.remove("active");
+
+        // Validation
+        if (!code) {
+          this.showVerifyError(this.t("VERIFY_CODE_REQUIRED"));
+          return;
+        }
+
+        // Disable button during verification
+        verifyButton.disabled = true;
+        verifyButton.textContent = this.t("VERIFY_IN_PROGRESS");
+
+        try {
+          const response = await invoke("verify_registration", { code });
+          const jsonResponse = JSON.parse(response);
+
+          if (jsonResponse && jsonResponse.Return && jsonResponse.Msg === "success") {
+            this.showVerifySuccess(this.t("VERIFY_SUCCESS"));
+            // Wait 2 seconds then redirect to login
+            setTimeout(async () => {
+              await this.Router.navigate("login");
+            }, 2000);
+          } else {
+            // Handle specific error messages from API
+            let errorMsg = this.t("VERIFY_ERROR");
+            if (jsonResponse.ReturnCode === 10) {
+              errorMsg = this.t("VERIFY_INVALID_CODE");
+            } else if (jsonResponse.ReturnCode === 11) {
+              errorMsg = this.t("VERIFY_TOO_MANY_ATTEMPTS");
+            } else if (jsonResponse.Msg) {
+              errorMsg = jsonResponse.Msg;
+            }
+            this.showVerifyError(errorMsg);
+          }
+        } catch (error) {
+          console.error("Verification failed:", error);
+          this.showVerifyError(error.toString());
+        } finally {
+          verifyButton.disabled = false;
+          verifyButton.innerHTML = `<a class="login2" data-translate="VERIFY_BUTTON">${this.t("VERIFY_BUTTON")}</a>`;
+        }
+      });
+    }
+
+    // Back to signup link handler
+    if (backToSignupLink) {
+      backToSignupLink.addEventListener("click", async (e) => {
+        e.preventDefault();
+        await this.Router.navigate("signup");
+      });
+    }
+  },
+
+  /**
+   * Shows an error message on the verify form.
+   * @param {string} message - The error message to display.
+   */
+  showVerifyError(message) {
+    const verifyErrorMsg = document.getElementById("verify-error-msg");
+    const verifySuccessMsg = document.getElementById("verify-success-msg");
+    if (verifySuccessMsg) verifySuccessMsg.classList.remove("active");
+    if (verifyErrorMsg) {
+      verifyErrorMsg.textContent = message;
+      verifyErrorMsg.classList.add("active");
+    }
+  },
+
+  /**
+   * Shows a success message on the verify form.
+   * @param {string} message - The success message to display.
+   */
+  showVerifySuccess(message) {
+    const verifyErrorMsg = document.getElementById("verify-error-msg");
+    const verifySuccessMsg = document.getElementById("verify-success-msg");
+    if (verifyErrorMsg) verifyErrorMsg.classList.remove("active");
+    if (verifySuccessMsg) {
+      verifySuccessMsg.textContent = message;
+      verifySuccessMsg.classList.add("active");
+    }
   },
 
   /**
@@ -2100,6 +2948,7 @@ const App = {
    */
   setupHomePageElements() {
     this.launchGameBtn = document.querySelector("#launch-game-btn");
+    this.checkRepairBtn = document.querySelector("#check-repair-btn");
     this.statusEl = document.querySelector("#game-status");
   },
 
@@ -2115,7 +2964,13 @@ const App = {
   setupHomePageEventListeners() {
     if (this.launchGameBtn) {
       this.launchGameBtn.addEventListener("click", () =>
-        this.handleLaunchGame(),
+        this.handleLaunchGame()
+      );
+    }
+
+    if (this.checkRepairBtn) {
+      this.checkRepairBtn.addEventListener("click", () =>
+        this.handleCheckRepair()
       );
     }
 
@@ -2132,13 +2987,151 @@ const App = {
     if (generateHashFileBtn && this.checkPrivilegeLevel()) {
       generateHashFileBtn.style.display = "block";
       generateHashFileBtn.addEventListener("click", () =>
-        this.generateHashFile(),
+        this.generateHashFile()
       );
     }
 
     const appQuitButton = document.getElementById("app-quit");
     if (appQuitButton) {
       appQuitButton.addEventListener("click", () => this.appQuit());
+    }
+
+    const toolboxBtn = document.getElementById("toolbox-btn");
+    if (toolboxBtn) {
+      toolboxBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        this.launchToolbox();
+      });
+    }
+  },
+
+  /**
+   * Loads the client version from the backend config
+   * and displays it in the UI.
+   */
+  async loadClientVersion() {
+    const versionElement = document.getElementById("client-version-value");
+    if (!versionElement) {
+      console.warn("Client version element not found");
+      return;
+    }
+
+    try {
+      const version = await invoke("get_client_version");
+      versionElement.textContent = `${version}`;
+    } catch (error) {
+      console.error("Error loading client version:", error);
+      versionElement.textContent = "--.--";
+    }
+  },
+
+  /**
+   * Displays a custom maintenance modal with details.
+   * Assumes there is a modal element with the ID 'maintenance-modal' in the DOM.
+   * @param {Object} details - Maintenance details (Msg, StartTime, EndTime).
+   */
+  showMaintenanceModal(details) {
+    const modal = document.getElementById("maintenance-modal");
+    if (!modal) {
+      // Fallback to a simple message if the custom modal does not exist
+      message(
+        details.Msg ||
+          "The server is under maintenance. Please try again later.",
+        {
+          title: "Server Maintenance",
+          type: "error",
+        }
+      );
+      return;
+    }
+
+    const messageEl = modal.querySelector(".maintenance-message");
+    const startTimeEl = modal.querySelector(".maintenance-start-time");
+    const endTimeEl = modal.querySelector(".maintenance-end-time");
+
+    // Time formatting function
+    const formatTime = (timestamp) => {
+      if (!timestamp) return "N/A";
+      const date = new Date(timestamp * 1000); // Convert to milliseconds
+      return date.toLocaleString("en-US"); // Adjust locale as needed
+    };
+
+    if (messageEl) {
+      messageEl.textContent = this.t("MAINTENANCE_MESSAGE");
+    }
+    if (startTimeEl) startTimeEl.textContent = formatTime(details.StartTime);
+    if (endTimeEl) endTimeEl.textContent = formatTime(details.EndTime);
+
+    // Show the modal (using your CSS logic)
+    modal.style.display = "flex";
+    this.state.isMaintenanceActive = true;
+    this.state.maintenanceDetails = details;
+  },
+
+  hideMaintenanceModal() {
+    const modal = document.getElementById("maintenance-modal");
+    if (modal) {
+      modal.style.display = "none";
+    }
+    this.state.isMaintenanceActive = false;
+    this.state.maintenanceDetails = null;
+  },
+
+  /**
+   * Displays the generic error modal.
+   * @param {string} title - The title for the modal (or a translation key).
+   * @param {string} message - The error message to display (or a translation key).
+   * @param {boolean} [isCritical=false] - If true, the "OK" button will close the application.
+   */
+  showErrorModal(title, message, isCritical = false) {
+    const modal = document.getElementById("error-modal");
+    if (!modal) {
+      // Fallback to system dialog if the HTML modal is not found
+      const { message: tauriMessage } = window.__TAURI__.dialog;
+      tauriMessage(message, { title: title, type: "error" });
+      return;
+    }
+
+    const titleEl = modal.querySelector("#error-modal-title");
+    const messageEl = modal.querySelector("#error-modal-message");
+    const okButton = modal.querySelector(".modal-close-button");
+
+    if (titleEl) {
+      // Try to translate the title if it's a key; otherwise, use the raw text
+      const translatedTitle = this.t(title) || title;
+      titleEl.textContent = translatedTitle;
+    }
+    if (messageEl) {
+      // Try to translate the message if it's a key; otherwise, use the raw text
+      const translatedMessage = this.t(message) || message;
+      messageEl.textContent = translatedMessage;
+    }
+
+    if (okButton) {
+      // Clone and replace the button to remove old event listeners
+      const newButton = okButton.cloneNode(true);
+      newButton.textContent = this.t("ACKNOWLEDGE"); // Ensure the button text is correct
+      okButton.parentNode.replaceChild(newButton, okButton);
+
+      if (isCritical) {
+        // If critical, the "OK" button will close the application
+        newButton.onclick = () => this.appQuit();
+      } else {
+        // Normal behavior: just close the modal
+        newButton.onclick = () => this.hideErrorModal();
+      }
+    }
+
+    modal.style.display = "flex";
+  },
+
+  /**
+   * Hides the generic error modal.
+   */
+  hideErrorModal() {
+    const modal = document.getElementById("error-modal");
+    if (modal) {
+      modal.style.display = "none";
     }
   },
 
@@ -2160,13 +3153,14 @@ const App = {
     this.updateUI();
     const isGameRunning = await this.isGameRunning();
     this.updateUIForGameStatus(isGameRunning);
+    this.loadClientVersion();
   },
 
   // Update the initUserPanel method
   initUserPanel() {
     const btnUserAvatar = document.querySelector(".btn-user-avatar");
     const dropdownPanelWrapper = document.querySelector(
-      ".dropdown-panel-wrapper",
+      ".dropdown-panel-wrapper"
     );
     if (!btnUserAvatar || !dropdownPanelWrapper) {
       console.warn("User panel elements not found in the DOM");
@@ -2181,15 +3175,28 @@ const App = {
       display: "none",
       opacity: 0,
       y: -10,
+      pointerEvents: "none",
+      visibility: "hidden",
     });
 
     // Create a reusable GSAP timeline
-    const tl = gsap.timeline({ paused: true });
+    const tl = gsap.timeline({ 
+      paused: true,
+      onReverseComplete: () => {
+        gsap.set(dropdownPanelWrapper, {
+          display: "none",
+          visibility: "hidden",
+          pointerEvents: "none",
+        });
+      }
+    });
     tl.to(dropdownPanelWrapper, {
       duration: 0.3,
       display: "block",
+      visibility: "visible",
       opacity: 1,
       y: 0,
+      pointerEvents: "auto",
       ease: "power2.out",
     });
 
@@ -2397,14 +3404,14 @@ const App = {
       modal = document.createElement("div");
       modal.id = "log-modal";
       modal.innerHTML = `
-                <div class="log-modal-content">
-                    <div class="log-modal-header">
-                        <h2>${this.t("GAME_LOGS")}</h2>
-                        <span class="log-modal-close">&times;</span>
-                    </div>
-                    <div id="log-console"></div>
-                </div>
-            `;
+        <div class="log-modal-content">
+          <div class="log-modal-header">
+            <h2>${this.t("GAME_LOGS")}</h2>
+            <span class="log-modal-close">&times;</span>
+          </div>
+          <div id="log-console"></div>
+        </div>
+      `;
       document.body.appendChild(modal);
 
       const closeBtn = modal.querySelector(".log-modal-close");
@@ -2461,10 +3468,10 @@ const App = {
       }
 
       logEntry.innerHTML = `
-                <span class="log-entry-time">[${time}]</span>
-                <span class="log-entry-level ${logLevel}">${logLevel.toUpperCase()}:</span>
-                <span class="log-entry-message">${messageContent}</span>
-            `;
+        <span class="log-entry-time">[${time}]</span>
+        <span class="log-entry-level ${logLevel}">${logLevel.toUpperCase()}:</span>
+        <span class="log-entry-message">${messageContent}</span>
+      `;
       console.appendChild(logEntry);
       console.scrollTop = console.scrollHeight;
     }
@@ -2498,7 +3505,7 @@ const App = {
         this.completeFirstLaunch();
         this.showCustomNotification(
           this.t("GAME_PATH_SET_FIRST_LAUNCH"),
-          "success",
+          "success"
         );
       } else {
         this.showCustomNotification(this.t("GAME_PATH_UPDATED"), "success");
@@ -2534,7 +3541,9 @@ const App = {
       ) {
         errorMessage = this.t("CONFIG_INI_MISSING");
       } else {
-        errorMessage = `${this.t("GAME_PATH_LOAD_ERROR")} ${error && error ? error : ""}`;
+        errorMessage = `${this.t("GAME_PATH_LOAD_ERROR")} ${
+          error && error ? error : ""
+        }`;
       }
 
       const userResponse = await message(errorMessage, {
@@ -2553,6 +3562,14 @@ const App = {
    * to allow the user to interact with the window.
    */
   setupWindowControls() {
+    // Game logs
+    const appDebugBtn = document.getElementById("debug-button");
+    if (appDebugBtn) {
+      appDebugBtn.addEventListener("click", () =>
+        this.toggleModal("log-modal", true)
+      );
+    }
+
     const appMinimizeBtn = document.getElementById("app-minimize");
     if (appMinimizeBtn) {
       appMinimizeBtn.addEventListener("click", () => appWindow.minimize());
@@ -2602,7 +3619,7 @@ const App = {
           e.target,
           selectStyled,
           selectOptions,
-          originalSelect,
+          originalSelect
         );
       });
     });
@@ -2727,13 +3744,15 @@ const App = {
     const userName = localStorage.getItem("userName");
     const userNo = parseInt(localStorage.getItem("userNo"), 10);
     const characterCount = localStorage.getItem("characterCount");
+    const sessionCookie = localStorage.getItem("sessionCookie");
 
-    if (authKey && userName && userNo && characterCount) {
+    if (authKey && userName && userNo && characterCount && sessionCookie) {
       await invoke("set_auth_info", {
         authKey,
         userName,
         userNo,
         characterCount,
+        sessionCookie,
       });
     }
   },
@@ -2768,7 +3787,7 @@ const App = {
 
       this.toggleHashProgressModal(
         true,
-        this.t("INITIALIZING_HASH_GENERATION"),
+        this.t("INITIALIZING_HASH_GENERATION")
       );
 
       const unlistenProgress = await listen("hash_file_progress", (event) => {
@@ -2930,6 +3949,17 @@ App.Router = createRouter(App);
 
 // Expose App globally if necessary
 window.App = App;
+
+// Global function for toolbox button
+window.launchToolbox = async function() {
+  try {
+    const { invoke } = window.__TAURI__.tauri;
+    await invoke("launch_toolbox");
+  } catch (error) {
+    console.error("Failed to launch Toolbox:", error);
+    alert("Failed to launch Toolbox: " + error);
+  }
+};
 
 // Initialize the app when the DOM is fully loaded
 window.addEventListener("DOMContentLoaded", () => App.init());

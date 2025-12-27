@@ -1,6 +1,6 @@
 [package]
 name = "teralaunch"
-version = "0.0.0"
+version = "1.1.1"
 description = "A Tauri App"
 authors = ["TNC97"]
 edition = "2021"
@@ -19,7 +19,7 @@ parking_lot = "0.12.1"
 tokio = { version = "1.37.0", features = ["full"] }
 tokio-macros = "2.2.0"
 log = "0.4.22"
-reqwest = { version = "0.12.7", features = ["json", "stream"] }
+reqwest = { version = "0.12.7", features = ["json", "stream", "cookies", "blocking"] }
 lazy_static = "1.4.0"
 rust-ini = "0.21.0"
 sha2 = "0.10.8"
@@ -32,6 +32,8 @@ env_logger = "0.10.0"
 devtools = "0.3.3"
 tracing = "0.1"
 dotenv = "0.15.0"
+url = "2.5.7"
+regex = "1.12.2"
 
 
 

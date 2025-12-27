@@ -1,0 +1,9 @@
+{
+  "version": "1.1.1",
+  "download_url": "https://www.neolithictera.com/TeraDirect/launcher/teralauncher.exe",
+  "file_name": "teralauncher.exe",
+  "changelog": "- Added launcher auto-update feature\n- Bug fixes and performance improvements",
+  "release_date": "2024-12-20",
+  "hash": "",
+  "mandatory": false
+}

@@ -9,6 +9,8 @@ use once_cell::sync::Lazy;
 use prost::Message;
 use reqwest;
 use serde_json::Value;
+use quick_xml::Reader;
+use quick_xml::events::Event;
 use std::{
     ffi::OsStr,
     os::windows::ffi::OsStrExt,
@@ -18,8 +20,10 @@ use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc, {Arc, Mutex},
+        RwLock,
     },
     time::Duration,
+    collections::HashMap,
 };
 use tokio::{
     runtime::Runtime,
@@ -56,6 +60,9 @@ use serverlist::{server_list::ServerInfo, ServerList};
 // Global static variables
 lazy_static! {
     static ref SERVER_LIST_SENDER: Mutex<Option<mpsc::Sender<(WPARAM, usize)>>> = Mutex::new(None);
+
+    static ref ACTS_MAP: RwLock<HashMap<String, String>> = RwLock::new(HashMap::new());
+    static ref PAGES_MAP: RwLock<HashMap<String, String>> = RwLock::new(HashMap::new());
 }
 
 /// Handle to the game window.
@@ -191,6 +198,8 @@ pub async fn run_game(
     ticket: &str,
     game_lang: &str,
     game_path: &str,
+    acts_map: HashMap<String, String>,
+    pages_map: HashMap<String, String>,
 ) -> Result<ExitStatus, Box<dyn std::error::Error>> {
     info!("Starting run_game function");
 
@@ -198,16 +207,37 @@ pub async fn run_game(
         return Err("Game is already running".into());
     }
 
+    {
+        let mut acts_map_guard = ACTS_MAP.write().unwrap();
+        *acts_map_guard = acts_map;
+        info!("actsMap received with {} entries", acts_map_guard.len());
+    }
+
+    {
+        let mut pages_map_guard = PAGES_MAP.write().unwrap();
+        *pages_map_guard = pages_map;
+        info!("pagesMap received with {} entries", pages_map_guard.len());
+    }
+
     set_credentials(account_name, characters_count, ticket, game_lang, game_path);
 
-    info!(
-        "Set credentials - Account: {}, Characters_count: {}, Ticket: {}, Lang: {}, Game Path: {}",
-        GLOBAL_CREDENTIALS.get_account_name(),
-        GLOBAL_CREDENTIALS.get_characters_count(),
-        GLOBAL_CREDENTIALS.get_ticket(),
-        GLOBAL_CREDENTIALS.get_game_lang(),
-        GLOBAL_CREDENTIALS.get_game_path()
-    );
+    if cfg!(debug_assertions) {
+        info!(
+            "Set credentials - Account: {}, Characters_count: {}, Ticket: {}, Lang: {}, Game Path: {}",
+            GLOBAL_CREDENTIALS.get_account_name(),
+            GLOBAL_CREDENTIALS.get_characters_count(),
+            GLOBAL_CREDENTIALS.get_ticket(),
+            GLOBAL_CREDENTIALS.get_game_lang(),
+            GLOBAL_CREDENTIALS.get_game_path()
+        );
+    } else {
+        info!(
+            "Set credentials - Characters_count: {}, Lang: {}, Game Path: {}",
+            GLOBAL_CREDENTIALS.get_characters_count(),
+            GLOBAL_CREDENTIALS.get_game_lang(),
+            GLOBAL_CREDENTIALS.get_game_path()
+        );
+    }
 
     launch_game().await
 }
@@ -229,10 +259,14 @@ async fn launch_game() -> Result<ExitStatus, Box<dyn std::error::Error>> {
     GAME_STATUS_SENDER.send(true).unwrap();
     info!("Game status set to running");
 
-    info!(
-        "Launching game for account: {}",
-        GLOBAL_CREDENTIALS.get_account_name()
-    );
+    if cfg!(debug_assertions) {
+        info!(
+            "Launching game for account: {}",
+            GLOBAL_CREDENTIALS.get_account_name()
+        );
+    } else {
+        info!("Launching game for account");
+    }
 
     let (tx, rx) = mpsc::channel::<(WPARAM, usize)>();
     *SERVER_LIST_SENDER.lock().unwrap() = Some(tx);
@@ -246,7 +280,7 @@ async fn launch_game() -> Result<ExitStatus, Box<dyn std::error::Error>> {
     tokio::spawn(async move {
         while let Ok((w_param, sender)) = rx.recv() {
             unsafe {
-                handle_server_list_request(w_param, sender);
+                handle_server_list_request(w_param, sender, &[]);
             }
         }
     });
@@ -339,6 +373,12 @@ pub fn reset_global_state() {
     if let Ok(mut handle) = WINDOW_HANDLE.lock() {
         *handle = None;
     }
+    if let Ok(mut map) = ACTS_MAP.write() {
+        map.clear();
+    }
+    if let Ok(mut map) = PAGES_MAP.write() {
+        map.clear();
+    }
     info!("Global state reset completed");
 }
 
@@ -386,8 +426,13 @@ unsafe extern "system" fn wnd_proc(
             match event_id {
                 1 => handle_account_name_request(w_param, h_wnd),
                 3 => handle_session_ticket_request(w_param, h_wnd),
-                5 => handle_server_list_request(w_param, h_wnd as usize),
+                5 => handle_server_list_request(w_param, h_wnd as usize, payload),
                 7 => handle_enter_lobby_or_world(w_param, h_wnd, payload),
+                25 => handle_open_website_command(w_param, h_wnd, payload),
+                ///////  TODO
+                //26 => handle_web_url_request(w_param, h_wnd, payload), //LauncherWebURLRequest uint32_t id; u16string arguments;
+                //27 => handle_web_url_response(w_param, h_wnd, payload), //LauncherWebURLResponse uint32_t id; u16string url;
+                ///////
                 1000 => handle_game_start(w_param, h_wnd, payload),
                 1001..=1016 => handle_game_event(w_param, h_wnd, event_id, payload),
                 1020 => handle_game_exit(w_param, h_wnd, payload),
@@ -598,12 +643,14 @@ unsafe fn send_response_message(
 /// * `sender` - The sender's window handle as a HWND.
 unsafe fn handle_account_name_request(recipient: WPARAM, sender: HWND) {
     let account_name = GLOBAL_CREDENTIALS.get_account_name();
-    info!("Account Name Request - Sending: {}", account_name);
+    info!("Account Name Request - Sending: '{}' (length: {} chars)", account_name, account_name.len());
     let account_name_utf16: Vec<u8> = account_name
         .encode_utf16()
         .flat_map(|c| c.to_le_bytes().to_vec())
         .collect();
+    info!("Account Name UTF-16 bytes: {} bytes", account_name_utf16.len());
     send_response_message(recipient, sender, 2, &account_name_utf16);
+    info!("Game event 2 (LAUNCHER_GAME_EVENT_ACCOUNT_NAME_RESPONSE) sended");
 }
 
 /// Handles the session ticket request from the game client.
@@ -620,8 +667,11 @@ unsafe fn handle_account_name_request(recipient: WPARAM, sender: HWND) {
 /// * `sender` - The sender's window handle as a HWND.
 unsafe fn handle_session_ticket_request(recipient: WPARAM, sender: HWND) {
     let session_ticket = GLOBAL_CREDENTIALS.get_ticket();
-    info!("Session Ticket Request - Sending: {}", session_ticket);
+    info!("Session Ticket Request - Sending: '{}' (length: {} chars)", session_ticket, session_ticket.len());
+    // Send as UTF-8 bytes (not UTF-16!) - this is how the original launcher does it
+    info!("Session Ticket bytes: {} bytes", session_ticket.as_bytes().len());
     send_response_message(recipient, sender, 4, session_ticket.as_bytes());
+    info!("Game event 4 (LAUNCHER_GAME_EVENT_SESSION_TICKET_RESPONSE) sended");
 }
 
 /// Handles the server list request from the game client.
@@ -636,11 +686,25 @@ unsafe fn handle_session_ticket_request(recipient: WPARAM, sender: HWND) {
 ///
 /// * `recipient` - The HWND of the recipient window as a WPARAM.
 /// * `sender` - The sender's window handle as a usize.
-unsafe fn handle_server_list_request(recipient: WPARAM, sender: usize) {
+/// * `payload` - The request payload (may contain sort criterion or filter information).
+unsafe fn handle_server_list_request(recipient: WPARAM, sender: usize, payload: &[u8]) {
+    // Log the payload
+    if !payload.is_empty() {
+        let hex_payload: Vec<String> = payload.iter().map(|b| format!("{:02X}", b)).collect();
+        info!("Server list request payload (hex): {}", hex_payload.join(" "));
+        
+        // Try to interpret as sort criterion (u32)
+        if payload.len() >= 4 {
+            let sort_criterion = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0, 0, 0, 0]));
+            info!("Interpreted as sort criterion: {} ({})", sort_criterion, if sort_criterion == 0xFFFFFFFF { "all/default" } else { "specific" });
+        }
+    }
+    
     let runtime = Runtime::new().expect("Failed to create Tokio runtime");
     let server_list_data =
         runtime.block_on(async { get_server_list().await.expect("Failed to get server list") });
     send_response_message(recipient, sender as HWND, 6, &server_list_data);
+    info!("Game event 6 (LAUNCHER_GAME_EVENT_SERVER_LIST_RESPONSE) sended");
 }
 
 /// Handles the event of entering a lobby or world.
@@ -668,6 +732,126 @@ unsafe fn handle_enter_lobby_or_world(recipient: WPARAM, sender: HWND, payload: 
     }
 }
 
+/// Handles the "Open Website" game command (0x19).
+///
+/// This function is called when the game requests to open a website
+/// in the system's default web browser.
+///
+/// # Safety
+///
+/// This function is unsafe due to its use of raw pointers and `transmute`.
+///
+/// # Arguments
+///
+/// * `_recipient` - The HWND of the recipient window as a WPARAM (unused).
+/// * `_sender` - The HWND of the sender window (unused).
+/// * `payload` - The payload containing the `LauncherOpenWebsiteCommand` data.
+unsafe fn handle_open_website_command(_recipient: WPARAM, _sender: HWND, payload: &[u8]) {
+    let event_name = "LAUNCHER_GAME_OPEN_WEBSITE_COMMAND";
+    
+    // ... (payload size check)
+    if payload.len() != std::mem::size_of::<u32>() {
+        error!(
+            "Game event 25 ({}) received with invalid payload size: {} bytes (expected: {} bytes)",
+            event_name,
+            payload.len(),
+            std::mem::size_of::<u32>()
+        );
+        return;
+    }
+
+    // Parse the payload
+    let website_id = u32::from_le_bytes(payload.try_into().unwrap());
+    let website_id_str = website_id.to_string(); // The ID will be the map key
+    
+    info!("Game event 25 ({}) received - Website ID: {}", event_name, website_id);
+    
+    // --- REPLACED LOGIC ---
+    
+    // 1. Lock the global PAGES_MAP from teralib for reading
+    let url_to_open: Option<String> = {
+        let map_guard = PAGES_MAP.read().unwrap();
+        // 2. Look up the URL using the ID as the key and clone it
+        map_guard.get(&website_id_str).cloned()
+    };
+
+    // 3. Open the URL if it was found
+    if let Some(url) = url_to_open {
+        info!("Found URL for ID {}: {}", website_id, url);
+        // Format the URL if it contains %s (for authKey, etc.)
+        // (Although it's usually unnecessary for PAGES_MAP, it's good practice)
+        let final_url = if url.contains("%s") {
+            // Note: ACTS_MAP uses %s, PAGES_MAP usually does not.
+            // If you also need the AuthKey here, you'll have to store it in GLOBAL_CREDENTIALS
+            // and retrieve it. For now, assume PAGES_MAP contains direct URLs.
+            url.replace("%s", &GLOBAL_CREDENTIALS.get_ticket())
+        } else {
+            url
+        };
+
+        if let Err(err) = open_website(&final_url) {
+            error!("Failed to open website '{}': {}", final_url, err);
+        }
+    } else {
+        info!("No URL found in PAGES_MAP for ID: {}. Ignoring.", website_id);
+    }
+}
+
+/// Opens a website in the system's default browser.
+///
+/// Uses platform-specific commands to ensure compatibility across Windows, macOS, and Linux.
+fn open_website(url: &str) -> std::io::Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", url])
+            .spawn()?;
+    }
+
+    // #[cfg(target_os = "macos")]
+    // {
+    //     std::process::Command::new("open")
+    //         .arg(url)
+    //         .spawn()?;
+    // }
+
+    // #[cfg(target_os = "linux")]
+    // {
+    //     std::process::Command::new("xdg-open")
+    //         .arg(url)
+    //         .spawn()?;
+    // }
+
+    Ok(())
+}
+
+// TODO handle_web_url_request & handle_web_url_response
+
+/// Handles the game Web URL Request command (0x1A).
+///
+/// This function processes the request sent by the game to obtain
+/// the corresponding URL based on the UIWindow ID.
+///
+/// # Safety
+///
+/// This function is unsafe because it works with raw pointers and unverified payload data.
+// unsafe fn handle_web_url_request(_recipient: WPARAM, _sender: HWND, payload: &[u8]) {
+//     let event_name = "LauncherWebURLRequest";
+//     info!("Game event 26 ({}) received", event_name);
+// }
+
+/// Handles the game Web URL Response command (0x1B).
+///
+/// This function sends the resolved URL back to the game.
+///
+/// # Safety
+///
+/// Unsafe due to raw pointer usage.
+// unsafe fn handle_web_url_response(_recipient: WPARAM, _sender: HWND, id: u32, url: &str) {
+//     let event_name = "LauncherWebURLResponse";
+//     info!("Game event 27 ({}) received - ID: {}, URL: {}", event_name, id, url);
+// }
+
 /// Handles the game start event.
 ///
 /// This function is called when the game starts. Currently, it only logs the event.
@@ -682,7 +866,9 @@ unsafe fn handle_enter_lobby_or_world(recipient: WPARAM, sender: HWND, payload: 
 /// * `_sender` - The HWND of the sender window (unused).
 /// * `_payload` - The payload associated with the game start event (unused).
 unsafe fn handle_game_start(_recipient: WPARAM, _sender: HWND, _payload: &[u8]) {
+    let event_name = "LAUNCHER_GAME_EVENT_GAME_STARTED";
     info!("Game started");
+    info!("Game event 1000 ({}) received", event_name);
 }
 
 /// Handles various game events.
@@ -701,7 +887,27 @@ unsafe fn handle_game_start(_recipient: WPARAM, _sender: HWND, _payload: &[u8]) 
 /// * `event_id` - The identifier of the game event.
 /// * `_payload` - The payload associated with the game event (unused).
 unsafe fn handle_game_event(_recipient: WPARAM, _sender: HWND, event_id: usize, _payload: &[u8]) {
-    info!("Game event {} received", event_id);
+    let event_name = match event_id {
+        1001 => "LAUNCHER_GAME_EVENT_ENTERED_INTO_CINEMATIC",
+        1002 => "LAUNCHER_GAME_EVENT_ENTERED_SERVER_LIST",
+        1003 => "LAUNCHER_GAME_EVENT_ENTERING_LOBBY",
+        1004 => "LAUNCHER_GAME_EVENT_ENTERED_LOBBY",
+        1005 => "LAUNCHER_GAME_EVENT_ENTERING_CHARACTER_CREATION",
+        1006 => "LAUNCHER_GAME_EVENT_LEFT_LOBBY",
+        1007 => "LAUNCHER_GAME_EVENT_DELETED_CHARACTER",
+        1008 => "LAUNCHER_GAME_EVENT_CANCELED_CHARACTER_CREATION",
+        1009 => "LAUNCHER_GAME_EVENT_ENTERED_CHARACTER_CREATION",
+        1010 => "LAUNCHER_GAME_EVENT_CREATED_CHARACTER",
+        1011 => "LAUNCHER_GAME_EVENT_ENTERED_WORLD",
+        1012 => "LAUNCHER_GAME_EVENT_FINISHED_LOADING_SCREEN",
+        1013 => "LAUNCHER_GAME_EVENT_LEFT_WORLD",
+        1014 => "LAUNCHER_GAME_EVENT_MOUNTED_PEGASUS",
+        1015 => "LAUNCHER_GAME_EVENT_DISMOUNTED_PEGASUS",
+        1016 => "LAUNCHER_GAME_EVENT_CHANGED_CHANNEL",
+        _ => "UNKNOWN_LAUNCHER_GAME_EVENT",
+    };
+
+    info!("Game event {} ({}) received", event_id, event_name);
 }
 
 /// Handles the game exit event.
@@ -718,7 +924,9 @@ unsafe fn handle_game_event(_recipient: WPARAM, _sender: HWND, event_id: usize, 
 /// * `_sender` - The HWND of the sender window (unused).
 /// * `_payload` - The payload associated with the game exit event (unused).
 unsafe fn handle_game_exit(_recipient: WPARAM, _sender: HWND, _payload: &[u8]) {
+    let event_name = "LAUNCHER_GAME_EVENT_GAME_EXIT";
     info!("Game ended");
+    info!("Game event 1020 ({}) received", event_name);
 }
 
 /// Handles the game crash event.
@@ -735,7 +943,9 @@ unsafe fn handle_game_exit(_recipient: WPARAM, _sender: HWND, _payload: &[u8]) {
 /// * `_sender` - The HWND of the sender window (unused).
 /// * `_payload` - The payload associated with the game crash event (unused).
 unsafe fn handle_game_crash(_recipient: WPARAM, _sender: HWND, _payload: &[u8]) {
+    let event_name = "LAUNCHER_GAME_EVENT_GAME_CRASH";
     error!("Game crash detected");
+    info!("Game event 1021 ({}) received", event_name);
 }
 
 /// Logs the event of entering the lobby.
@@ -755,30 +965,160 @@ fn on_world_entered(world_name: &str) {
 /// Asynchronously retrieves the server list.
 ///
 /// This function sends a GET request to a local server to retrieve the server list,
-/// then parses the JSON response into a ServerList struct.
+/// then returns the raw protobuf bytes from the server.
 ///
 /// # Returns
 ///
-/// A Result containing a Vec<u8> of the encoded server list on success, or an error on failure.
+/// A Result containing a Vec<u8> of the server list protobuf on success, or an error on failure.
 async fn get_server_list() -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let url = config::get_config_value("SERVER_LIST_URL");
+    info!("Fetching server list from: {}", url);
     let client = reqwest::Client::new();
     let response = client
-        .get(url)
+        .get(&url)
         .timeout(Duration::from_secs(10))
         .send()
         .await?;
 
     if !response.status().is_success() {
+        error!("Server list request failed with status: {}", response.status());
         return Err(format!("Unsuccessful HTTP response: {}", response.status()).into());
     }
 
-    let json: Value = response.json().await?;
+    // Get the JSON response and parse it
+    let json_text = response.text().await?;
+    info!("Received server list JSON: {} bytes", json_text.len());
+    
+    let json: serde_json::Value = serde_json::from_str(&json_text)?;
+    info!("Parsed JSON successfully");
+    
     let server_list = parse_server_list_json(&json)?;
-
+    info!("Parsed {} servers from JSON", server_list.servers.len());
+    
+    // Encode to protobuf
+    use prost::Message;
     let mut buf = Vec::new();
     server_list.encode(&mut buf)?;
+    info!("Encoded server list to protobuf: {} bytes", buf.len());
+    
+    // Dump first 100 bytes for debugging
+    let hex_dump: String = buf.iter().take(100).map(|b| format!("{:02X} ", b)).collect();
+    info!("Protobuf hex (first 100 bytes): {}", hex_dump);
+    
     Ok(buf)
+}
+
+/// Parses XML server list into ServerList struct.
+///
+/// Converts server list XML to ServerList with error checking.
+///
+/// # Arguments
+///
+/// * `xml_text` - XML string from the server list endpoint.
+///
+/// # Returns
+///
+/// Result<ServerList, Box<dyn std::error::Error>>
+fn parse_server_list_xml(xml_text: &str) -> Result<ServerList, Box<dyn std::error::Error>> {
+    use quick_xml::Reader;
+    use quick_xml::events::Event;
+    
+    let mut server_list = ServerList {
+        servers: vec![],
+        last_server_id: 0,
+        sort_criterion: 2,
+    };
+
+    // Parse character counts from credentials
+    let credentials = GLOBAL_CREDENTIALS.get_characters_count();
+    info!("Raw credentials string: {}", credentials);
+    let parts: Vec<&str> = credentials.split('|').collect();
+    
+    let player_last_server_id = if parts.len() > 1 && !parts[1].is_empty() {
+        parts[1].split(',').next().unwrap_or("0").parse::<u32>().unwrap_or(2800)
+    } else {
+        2800
+    };
+    
+    let character_counts: std::collections::HashMap<u32, u32> = if parts.len() > 1 {
+        parts[1].split(',').collect::<Vec<&str>>().chunks(2)
+            .filter_map(|chunk| {
+                if chunk.len() == 2 {
+                    Some((chunk[0].parse::<u32>().ok()?, chunk[1].parse::<u32>().ok()?))
+                } else { None }
+            }).collect()
+    } else {
+        std::collections::HashMap::new()
+    };
+
+    // Parse XML
+    let mut reader = Reader::from_str(xml_text);
+    reader.trim_text(true);
+    
+    let mut buf = Vec::new();
+    let mut current_server: Option<(u32, String, u32)> = None; // (id, ip, port)
+    let mut in_server = false;
+    
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(ref e)) if e.name().as_ref() == b"server" => {
+                in_server = true;
+                current_server = Some((0, String::new(), 0));
+            }
+            Ok(Event::End(ref e)) if e.name().as_ref() == b"server" => {
+                if let Some((id, ip, port)) = current_server.take() {
+                    let character_count = character_counts.get(&id).cloned().unwrap_or(0);
+                    let ipv4_u32 = ip.parse::<std::net::Ipv4Addr>()
+                        .map(|addr| u32::from_le_bytes(addr.octets()))
+                        .unwrap_or(0);
+                    
+                    server_list.servers.push(ServerInfo {
+                        id,
+                        name: Vec::new(),
+                        category: Vec::new(),
+                        title: Vec::new(),
+                        queue: Vec::new(),
+                        population: Vec::new(),
+                        address: ipv4_u32,
+                        port,
+                        available: 1,
+                        unavailable_message: Vec::new(),
+                        host: Vec::new(),
+                    });
+                }
+                in_server = false;
+            }
+            Ok(Event::Start(ref e)) if in_server => {
+                let tag_name = e.name();
+                if tag_name.as_ref() == b"id" {
+                    if let Ok(Event::Text(ref text)) = reader.read_event_into(&mut buf) {
+                        if let Some(ref mut server) = current_server {
+                            server.0 = text.unescape().unwrap().parse().unwrap_or(0);
+                        }
+                    }
+                } else if tag_name.as_ref() == b"ip" {
+                    if let Ok(Event::Text(ref text)) = reader.read_event_into(&mut buf) {
+                        if let Some(ref mut server) = current_server {
+                            server.1 = text.unescape().unwrap().to_string();
+                        }
+                    }
+                } else if tag_name.as_ref() == b"port" {
+                    if let Ok(Event::Text(ref text)) = reader.read_event_into(&mut buf) {
+                        if let Some(ref mut server) = current_server {
+                            server.2 = text.unescape().unwrap().parse().unwrap_or(0);
+                        }
+                    }
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(e) => return Err(format!("XML parse error: {}", e).into()),
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    server_list.last_server_id = player_last_server_id;
+    Ok(server_list)
 }
 
 /// Parses JSON into ServerList struct.
@@ -802,44 +1142,37 @@ fn parse_server_list_json(json: &Value) -> Result<ServerList, Box<dyn std::error
     };
 
     // Parse GLOBAL_CREDENTIALS.get_characters_count()
+    // API format: "lastLoginServer|serverId1,charCount1|serverId2,charCount2|..."
+    // Example: "2800|2800,3|2801,5|"
     let credentials = GLOBAL_CREDENTIALS.get_characters_count();
     info!("Raw credentials string: {}", credentials);
 
     let parts: Vec<&str> = credentials.split('|').collect();
 
-    let player_last_server = parts.first().unwrap_or(&"0");
-    let player_last_server_id = if parts.len() > 1 && !parts[1].is_empty() {
-        parts[1]
-            .split(',')
-            .next()
-            .unwrap_or("0")
-            .parse::<u32>()
-            .unwrap_or(0)
-    } else {
-        2800
-    };
+    // First part is the last login server ID
+    let player_last_server_id = parts.first()
+        .unwrap_or(&"0")
+        .parse::<u32>()
+        .unwrap_or(0);
 
-    // Parse character counts for each server
-    let character_counts: std::collections::HashMap<u32, u32> = if parts.len() > 1 {
-        parts[1]
-            .split(',')
-            .collect::<Vec<&str>>()
-            .chunks(2)
-            .filter_map(|chunk| {
-                if chunk.len() == 2 {
-                    Some((chunk[0].parse::<u32>().ok()?, chunk[1].parse::<u32>().ok()?))
-                } else {
-                    None
-                }
-            })
-            .collect()
-    } else {
-        std::collections::HashMap::new()
-    };
+    // Parse character counts for each server from parts[1..] 
+    // Each part is in format "serverId,charCount"
+    let mut character_counts: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
+    for part in parts.iter().skip(1) {
+        if part.is_empty() {
+            continue;
+        }
+        let pair: Vec<&str> = part.split(',').collect();
+        if pair.len() == 2 {
+            if let (Ok(server_id), Ok(char_count)) = (pair[0].parse::<u32>(), pair[1].parse::<u32>()) {
+                character_counts.insert(server_id, char_count);
+            }
+        }
+    }
 
     info!(
-        "Parsed values - Last server: {}, Last server ID: {}, Character counts: {:?}",
-        player_last_server, player_last_server_id, character_counts
+        "Parsed values - Last server ID: {}, Character counts: {:?}",
+        player_last_server_id, character_counts
     );
 
     let servers = json["servers"]
@@ -866,11 +1199,12 @@ fn parse_server_list_json(json: &Value) -> Result<ServerList, Box<dyn std::error
                 .ok_or("Missing or invalid 'name' field")?,
             display_count
         );
+        // Title should also include character count like the name, based on working launcher
         let title = format!(
-            "{}{}",
-            server["title"]
+            "{} {}",
+            server["name"]
                 .as_str()
-                .ok_or("Missing or invalid 'title' field")?,
+                .ok_or("Missing or invalid 'name' field")?,
             display_count
         );
 
@@ -928,7 +1262,13 @@ fn parse_server_list_json(json: &Value) -> Result<ServerList, Box<dyn std::error
         server_list.servers.push(server_info);
     }
 
-    server_list.last_server_id = player_last_server_id;
+    // If player_last_server_id is 0, default to first server's ID
+    // This ensures the field is always serialized (proto3 doesn't serialize 0 values)
+    server_list.last_server_id = if player_last_server_id == 0 {
+        server_list.servers.first().map(|s| s.id).unwrap_or(0)
+    } else {
+        player_last_server_id
+    };
     server_list.sort_criterion = json["sort_criterion"].as_u64().unwrap_or(3) as u32;
 
     Ok(server_list)

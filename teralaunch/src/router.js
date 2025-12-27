@@ -14,6 +14,18 @@ const createRouter = (App) => ({
             file: 'login.html',
             public: true,
             init: 'initLogin'
+        },
+        signup: {
+            title: 'Create Account',
+            file: 'signup.html',
+            public: true,
+            init: 'initSignup'
+        },
+        'signup-verify': {
+            title: 'Verify Email',
+            file: 'signup-verify.html',
+            public: true,
+            init: 'initSignupVerify'
         }
     },
 

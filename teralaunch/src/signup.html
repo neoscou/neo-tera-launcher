@@ -1,0 +1,36 @@
+<section class="login-form-container-wrapper">
+    <div class="login-form-container">
+      <div class="tera-logo-1-wrapper">
+        <img
+          class="tera-logo-1-icon"
+          loading="lazy"
+          alt=""
+          src="./assets/tera-logo@2x.png"
+        />
+      </div>
+      <form class="login-form signup-form" autocomplete="off">
+        <div class="login-wrapper">
+          <span class="login1" data-translate="SIGNUP_TITLE">Create Account</span>
+        </div>
+        <div class="input-fields-wrapper">
+          <div class="input-fields">
+            <input class="input-text" id="signup-username" name="username" data-translate-placeholder="USERNAME_PLACEHOLDER" placeholder="Username" type="text" maxlength="24" />
+            <input class="input-text" id="signup-email" name="email" data-translate-placeholder="EMAIL_PLACEHOLDER" placeholder="Email" type="text" />
+            <input class="input-text" id="signup-password" name="password" data-translate-placeholder="PASSWORD_PLACEHOLDER" placeholder="Password" type="password" maxlength="128" />
+            <input class="input-text" id="signup-confirm-password" name="confirmPassword" data-translate-placeholder="CONFIRM_PASSWORD_PLACEHOLDER" placeholder="Confirm Password" type="password" maxlength="128" />
+          </div>
+        </div>
+        <div class="signup-error-msg" id="signup-error-msg"></div>
+        <div class="signup-success-msg" id="signup-success-msg"></div>
+        <div class="btn-wrapper">
+          <button class="btn" id="signup-button" type="button">
+            <a class="login2" data-translate="SIGNUP_BUTTON">CREATE ACCOUNT</a>
+          </button>
+        </div>
+        <div class="create-account-wrapper">
+          <span data-translate="HAVE_ACCOUNT_TEXT">Already have an account?</span>
+          <a href="#" id="back-to-login-link" data-translate="BACK_TO_LOGIN_LINK">Login</a>
+        </div>
+      </form>
+    </div>
+  </section>

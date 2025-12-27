@@ -1,0 +1,11 @@
+D:\V100TERA\Neolithic Test Server\tera-rust-launcher\teralib\target\release\deps\socket2-0ad91db4a8d94ac7.d: C:\Users\Ryan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\socket2-0.5.7\src\lib.rs C:\Users\Ryan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\socket2-0.5.7\src\sockaddr.rs C:\Users\Ryan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\socket2-0.5.7\src\socket.rs C:\Users\Ryan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\socket2-0.5.7\src\sockref.rs C:\Users\Ryan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\socket2-0.5.7\src\sys\windows.rs
+
+D:\V100TERA\Neolithic Test Server\tera-rust-launcher\teralib\target\release\deps\libsocket2-0ad91db4a8d94ac7.rlib: C:\Users\Ryan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\socket2-0.5.7\src\lib.rs C:\Users\Ryan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\socket2-0.5.7\src\sockaddr.rs C:\Users\Ryan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\socket2-0.5.7\src\socket.rs C:\Users\Ryan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\socket2-0.5.7\src\sockref.rs C:\Users\Ryan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\socket2-0.5.7\src\sys\windows.rs
+
+D:\V100TERA\Neolithic Test Server\tera-rust-launcher\teralib\target\release\deps\libsocket2-0ad91db4a8d94ac7.rmeta: C:\Users\Ryan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\socket2-0.5.7\src\lib.rs C:\Users\Ryan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\socket2-0.5.7\src\sockaddr.rs C:\Users\Ryan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\socket2-0.5.7\src\socket.rs C:\Users\Ryan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\socket2-0.5.7\src\sockref.rs C:\Users\Ryan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\socket2-0.5.7\src\sys\windows.rs
+
+C:\Users\Ryan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\socket2-0.5.7\src\lib.rs:
+C:\Users\Ryan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\socket2-0.5.7\src\sockaddr.rs:
+C:\Users\Ryan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\socket2-0.5.7\src\socket.rs:
+C:\Users\Ryan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\socket2-0.5.7\src\sockref.rs:
+C:\Users\Ryan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\socket2-0.5.7\src\sys\windows.rs:
