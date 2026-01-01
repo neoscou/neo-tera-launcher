@@ -5,7 +5,7 @@
     "withGlobalTauri": true
   },
   "package": {
-    "productName": "teralauncher",
+    "productName": "Neolithic TERA Launcher",
     "version": "1.1.0"
   },
   "tauri": {
@@ -18,7 +18,7 @@
     },
     "windows": [
       {
-        "title": "Tera Launcher",
+        "title": "Neolithic TERA Launcher",
         "width": 1282,
         "height": 759,
         "resizable": false,
@@ -40,7 +40,7 @@
         "icons/logo.png",
         "icons/logo.ico"
       ],
-      "copyright": "Tera Launcher",
+      "copyright": "Neolithic TERA Launcher",
       "shortDescription": "Neolithic TERA Launcher"
     }
   }
