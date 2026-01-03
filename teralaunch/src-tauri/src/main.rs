@@ -3,7 +3,7 @@
 // Standard library imports
 use std::collections::{HashMap, HashSet};
 use std::env;
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
@@ -11,6 +11,21 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant, SystemTime};
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
+
+// Debug logging helper
+fn debug_log(msg: &str) {
+  let log_path = std::env::current_exe()
+    .ok()
+    .and_then(|p| p.parent().map(|p| p.join("debug.log")))
+    .unwrap_or_else(|| PathBuf::from("debug.log"));
+  
+  if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
+    use std::io::Write;
+    let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+    let _ = writeln!(file, "[{}] {}", timestamp, msg);
+  }
+  println!("{}", msg);
+}
 
 // Third-party imports
 use dotenv::dotenv;
@@ -303,12 +318,51 @@ fn is_ignored(path: &Path, game_path: &Path, ignored_paths: &HashSet<&str>) -> b
 }
 
 async fn get_server_hash_file() -> Result<serde_json::Value, String> {
+  let url = get_hash_file_url();
+  debug_log(&format!("DEBUG: Fetching hash file from: {}", url));
   let client = reqwest::Client::new();
   let res = client
-    .get(get_hash_file_url())
+    .get(&url)
+    .header("Cache-Control", "no-cache, no-store, must-revalidate")
+    .header("Pragma", "no-cache")
+    .header("Expires", "0")
     .send().await
     .map_err(|e| e.to_string())?;
-  let json: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
+  debug_log(&format!("DEBUG: Got response, status: {}", res.status()));
+  
+  // Read as text first to handle BOM
+  let text = res.text().await.map_err(|e| {
+    debug_log(&format!("ERROR: Failed to read response text: {}", e));
+    e.to_string()
+  })?;
+  
+  // Strip BOM if present
+  let text = text.trim_start_matches('\u{FEFF}');
+  
+  debug_log(&format!("DEBUG: Response text length: {} chars", text.len()));
+  
+  let json: serde_json::Value = serde_json::from_str(text).map_err(|e| {
+    debug_log(&format!("ERROR: Failed to parse JSON: {}", e));
+    debug_log(&format!("First 200 chars: {}", &text[..text.len().min(200)]));
+    e.to_string()
+  })?;
+  
+  debug_log("DEBUG: JSON parsed successfully");
+  
+  // Debug: Check DataCenter entry
+  if let Some(files) = json["files"].as_array() {
+    debug_log(&format!("DEBUG: Hash file contains {} files", files.len()));
+    if let Some(dc_entry) = files.iter().find(|f| f["path"].as_str() == Some("S1Game/S1Data/DataCenter_Final_EUR.dat")) {
+      debug_log(&format!("DEBUG: DataCenter in hash file - Hash: {}, Size: {}", 
+        dc_entry["hash"].as_str().unwrap_or("MISSING"),
+        dc_entry["size"].as_u64().unwrap_or(0)));
+    } else {
+      debug_log("DEBUG: DataCenter entry NOT FOUND in hash file!");
+    }
+  } else {
+    debug_log("ERROR: 'files' field is not an array or missing!");
+  }
+  
   Ok(json)
 }
 
@@ -1060,18 +1114,22 @@ async fn download_all_files(
 
 #[tauri::command]
 async fn get_files_to_update(window: tauri::Window) -> Result<Vec<FileInfo>, String> {
+  debug_log("=== Starting get_files_to_update ===");
   println!("Starting get_files_to_update");
 
   let start_time = Instant::now();
   let server_hash_file = get_server_hash_file().await?;
 
   let local_game_path = get_game_path()?;
+  debug_log(&format!("Local game path: {:?}", local_game_path));
   println!("Local game path: {:?}", local_game_path);
 
+  debug_log("Attempting to read server hash file");
   println!("Attempting to read server hash file");
   let files = server_hash_file["files"].as_array().ok_or("Invalid server hash file format")?;
   let directories = server_hash_file["directories"].as_array();
   
+  debug_log(&format!("Server hash file parsed, {} files found", files.len()));
   println!("Server hash file parsed, {} files found", files.len());
   
   // Build a map of files by directory for quick lookup
@@ -1152,6 +1210,19 @@ async fn get_files_to_update(window: tauri::Window) -> Result<Vec<FileInfo>, Str
     let verified = verified_count.load(Ordering::SeqCst);
     let needs_check = dirs_needing_check.lock().unwrap().len();
     
+    debug_log(&format!("Directory check completed in {:?}", dir_check_start.elapsed()));
+    debug_log(&format!("  Verified: {}", verified));
+    debug_log(&format!("  Directories needing update: {}", needs_check));
+    
+    // Debug: Check if S1Data is in the list
+    let needs_check_list = dirs_needing_check.lock().unwrap();
+    if needs_check_list.iter().any(|d| d.contains("S1Data")) {
+      debug_log("DEBUG: S1Data is in dirs_needing_check - will check files");
+    } else {
+      debug_log("DEBUG: S1Data NOT in dirs_needing_check - files will be skipped!");
+    }
+    drop(needs_check_list);
+    
     println!("Directory check completed in {:?}", dir_check_start.elapsed());
     println!("  Verified: {}", verified);
     println!("  Directories needing update: {}", needs_check);
@@ -1179,6 +1250,7 @@ async fn get_files_to_update(window: tauri::Window) -> Result<Vec<FileInfo>, Str
     })
     .collect();
 
+  debug_log(&format!("Checking {} files in {} directories", files_to_check.len(), dirs_needing_check.len()));
   println!("Checking {} files in {} directories", files_to_check.len(), dirs_needing_check.len());
 
   if files_to_check.is_empty() {
@@ -1216,6 +1288,13 @@ async fn get_files_to_update(window: tauri::Window) -> Result<Vec<FileInfo>, Str
       let server_hash = file_info["hash"].as_str().unwrap_or("");
       let size = file_info["size"].as_u64().unwrap_or(0);
       let url = file_info["url"].as_str().unwrap_or("").to_string();
+
+      // Debug DataCenter specifically
+      if path.contains("DataCenter_Final_EUR") {
+        debug_log("DEBUG: Checking DataCenter_Final_EUR.dat");
+        debug_log(&format!("  Server hash: {}", server_hash));
+        debug_log(&format!("  Server size: {}", size));
+      }
 
       let local_file_path = local_game_path.join(path);
 
@@ -1307,6 +1386,14 @@ async fn get_files_to_update(window: tauri::Window) -> Result<Vec<FileInfo>, Str
         last_modified: last_modified.unwrap_or_else(SystemTime::now),
       });
       drop(cache_write);
+
+      // Debug DataCenter hash comparison
+      if path.contains("DataCenter_Final_EUR") {
+        debug_log("DEBUG: DataCenter hash comparison:");
+        debug_log(&format!("  Local hash:  {}", local_hash.to_lowercase()));
+        debug_log(&format!("  Server hash: {}", server_hash.to_lowercase()));
+        debug_log(&format!("  Match: {}", local_hash.to_lowercase() == server_hash.to_lowercase()));
+      }
 
       if local_hash.to_lowercase() != server_hash.to_lowercase() {
         files_to_update_count.fetch_add(1, Ordering::SeqCst);
