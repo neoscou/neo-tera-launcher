@@ -16,9 +16,24 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/Swiper/8.4.5/swiper-bundle.min.css">
   <style>
+    * {
+      box-sizing: border-box;
+    }
+    
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      margin: 0;
+      padding: 0;
+    }
+    
     #app {
       position: relative;
-      height: 759px;
+      width: 100%;
+      height: 100%;
+      min-width: 1280px;
+      min-height: 1024px;
     }
 
     .page {
@@ -35,8 +50,8 @@
       position: fixed;
       top: 0;
       left: 0;
-      width: 1282px;
-      height: 759px;
+      width: 100%;
+      height: 100%;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -106,6 +121,7 @@
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Swiper/8.4.5/swiper-bundle.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/particles.js/2.0.0/particles.min.js"></script>
+  <script src="resize-handler.js"></script>
   <script src="router.js"></script>
   <script type="module" src="/app.js"></script>
 
@@ -151,6 +167,22 @@
       </div>
       <p id="hash-file-current-file"></p>
       <p id="hash-file-progress-text"></p>
+    </div>
+  </div>
+
+  <div id="log-modal" class="custom-modal-backdrop" style="display: none;">
+    <div class="custom-modal-content log-modal-content">
+      <h2 class="modal-title">Debug Logs</h2>
+      <div class="log-content-wrapper">
+        <div id="log-content" class="log-content"></div>
+      </div>
+      <div class="log-modal-buttons">
+        <button id="copy-logs-button" class="modal-action-button">
+          <i class="fas fa-copy"></i> Copy Logs
+        </button>
+        <button id="clear-logs-button" class="modal-action-button">Clear Logs</button>
+        <button id="close-log-modal" class="modal-close-button">Close</button>
+      </div>
     </div>
   </div>
 </body>

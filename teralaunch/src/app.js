@@ -3426,7 +3426,7 @@ const App = {
    * @returns {void}
    */
   appendLogMessage(message) {
-    const console = document.getElementById("log-console");
+    const logContent = document.getElementById("log-content");
     const currentTime = Date.now();
 
     // Check if this exact message was logged in the last 100ms
@@ -3441,14 +3441,14 @@ const App = {
     this.lastLogMessage = message;
     this.lastLogTime = currentTime;
 
-    if (console) {
+    if (logContent) {
       const logEntry = document.createElement("div");
       logEntry.className = "log-entry";
       const time = new Date().toLocaleTimeString();
 
       let logLevel = "info"; // Default log level
       let messageContent = message;
-      const logLevels = ["INFO", "DEBUG", "WARN", "ERROR", "CRITICAL"];
+      const logLevels = ["INFO", "DEBUG", "WARN", "ERROR", "CRITICAL", "SUCCESS"];
 
       // Remove any leading log level from the message
       for (const level of logLevels) {
@@ -3468,12 +3468,12 @@ const App = {
       }
 
       logEntry.innerHTML = `
-        <span class="log-entry-time">[${time}]</span>
-        <span class="log-entry-level ${logLevel}">${logLevel.toUpperCase()}:</span>
-        <span class="log-entry-message">${messageContent}</span>
+        <span class="log-timestamp">[${time}]</span>
+        <span class="log-level ${logLevel}">${logLevel.toUpperCase()}</span>
+        <span class="log-message">${messageContent}</span>
       `;
-      console.appendChild(logEntry);
-      console.scrollTop = console.scrollHeight;
+      logContent.appendChild(logEntry);
+      logContent.scrollTop = logContent.scrollHeight;
     }
   },
 
@@ -3578,6 +3578,82 @@ const App = {
     const appCloseBtn = document.getElementById("app-close");
     if (appCloseBtn) {
       appCloseBtn.addEventListener("click", () => this.appQuit());
+    }
+
+    // Setup log modal close button
+    const closeLogModalBtn = document.getElementById("close-log-modal");
+    if (closeLogModalBtn) {
+      closeLogModalBtn.addEventListener("click", () =>
+        this.toggleModal("log-modal", false)
+      );
+    }
+
+    // Setup clear logs button
+    const clearLogsBtn = document.getElementById("clear-logs-button");
+    if (clearLogsBtn) {
+      clearLogsBtn.addEventListener("click", () => this.clearLogs());
+    }
+
+    // Setup copy logs button
+    const copyLogsBtn = document.getElementById("copy-logs-button");
+    if (copyLogsBtn) {
+      copyLogsBtn.addEventListener("click", () => this.copyLogs());
+    }
+  },
+
+  /**
+   * Clears all log entries from the log modal
+   */
+  clearLogs() {
+    const logContent = document.getElementById("log-content");
+    if (logContent) {
+      logContent.innerHTML = '';
+      this.appendLogMessage("INFO - Logs cleared");
+    }
+  },
+
+  /**
+   * Copies all log entries to clipboard
+   */
+  async copyLogs() {
+    const logContent = document.getElementById("log-content");
+    if (!logContent) return;
+
+    const logEntries = logContent.querySelectorAll(".log-entry");
+    if (logEntries.length === 0) {
+      this.appendLogMessage("WARN - No logs to copy");
+      return;
+    }
+
+    let logText = "=== TERA Launcher Debug Logs ===\n";
+    logText += `Generated: ${new Date().toLocaleString()}\n`;
+    logText += "================================\n\n";
+
+    logEntries.forEach((entry) => {
+      const timestamp = entry.querySelector(".log-timestamp")?.textContent || "";
+      const level = entry.querySelector(".log-level")?.textContent || "";
+      const message = entry.querySelector(".log-message")?.textContent || "";
+      logText += `${timestamp} ${level} ${message}\n`;
+    });
+
+    try {
+      await navigator.clipboard.writeText(logText);
+      this.appendLogMessage("SUCCESS - Logs copied to clipboard");
+      
+      // Visual feedback on button
+      const copyBtn = document.getElementById("copy-logs-button");
+      if (copyBtn) {
+        const originalText = copyBtn.innerHTML;
+        copyBtn.innerHTML = '<i class="fas fa-check"></i> Copied!';
+        copyBtn.style.background = 'linear-gradient(135deg, rgba(74, 255, 74, 0.2), rgba(74, 255, 74, 0.15))';
+        setTimeout(() => {
+          copyBtn.innerHTML = originalText;
+          copyBtn.style.background = '';
+        }, 2000);
+      }
+    } catch (err) {
+      console.error("Failed to copy logs:", err);
+      this.appendLogMessage("ERROR - Failed to copy logs to clipboard");
     }
   },
 
