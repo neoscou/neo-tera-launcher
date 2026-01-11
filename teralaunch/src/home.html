@@ -61,6 +61,13 @@
 
 
               </div>
+              <!-- Toolbox Installation Progress -->
+              <div id="toolbox-progress-container" style="display: none; margin-top: 15px; padding: 10px; background: rgba(0,0,0,0.3); border-radius: 4px;">
+                <div id="toolbox-progress-text" style="color: #fff; font-size: 12px; margin-bottom: 5px; text-align: center;">Installing Toolbox...</div>
+                <div style="width: 100%; height: 20px; background: rgba(0,0,0,0.5); border-radius: 10px; overflow: hidden;">
+                  <div id="toolbox-progress-bar" style="width: 0%; height: 100%; background: linear-gradient(90deg, #4CAF50, #45a049); transition: width 0.3s ease;"></div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -130,6 +137,10 @@
               <span class="version-value" id="client-version-value"></span>
             </div>
           </div>
+          <button class="btn-uninstall-toolbox" id="uninstall-toolbox-btn" style="display: none;">
+            <i class="fas fa-trash-alt"></i>
+            <span>Uninstall Toolbox</span>
+          </button>
           <button class="btn-check-repair" id="check-repair-btn">
             <i class="fas fa-wrench"></i>
             <span data-translate="CHECK_REPAIR">CHECK / REPAIR</span>

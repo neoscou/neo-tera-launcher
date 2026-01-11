@@ -7,6 +7,23 @@ const { open: shellOpen } = window.__TAURI__.shell;
 const REQUIRED_PRIVILEGE_LEVEL = 3;
 const UPDATE_CHECK_ENABLED = true;
 
+// Frontend logging function that writes to backend debug.log via invoke
+function uiLog(message, data = null) {
+  const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
+  let logMessage = `[UI] ${message}`;
+  if (data !== null) {
+    logMessage += ' | ' + JSON.stringify(data);
+  }
+  
+  // Send to backend to write to debug.log
+  invoke('log_debug_message', { message: logMessage }).catch(e => {
+    console.error("Failed to write UI log:", e);
+  });
+  
+  // Also log to console
+  console.log(message, data);
+}
+
 const App = {
   translations: {},
   currentLanguage: "EUR",
@@ -90,6 +107,11 @@ const App = {
    * downloaded so far.
    */
   setState(newState) {
+    // CRITICAL DEBUG: Log every setState call to track the source of infinite loops
+    const stack = new Error().stack;
+    const caller = stack.split('\n')[2]?.trim() || 'unknown';
+    uiLog(`[setState] Called from: ${caller}`, { newState, currentMode: this.state.currentUpdateMode });
+    
     if (
       newState.totalSize !== undefined &&
       this.state.totalSize === undefined
@@ -128,6 +150,9 @@ const App = {
       await this.Router.navigate();
       this.sendStoredAuthInfoToBackend();
       this.setupMutationObserver();
+      
+      // Initialize Toolbox button
+      await this.initToolboxButton();
 
       this.checkAuthentication();
       document.addEventListener("DOMContentLoaded", () => {
@@ -261,6 +286,12 @@ const App = {
     listen("file_check_progress", this.handleFileCheckProgress.bind(this));
     listen("file_check_completed", this.handleFileCheckCompleted.bind(this));
     listen("download_complete", () => {
+      uiLog("=== download_complete event received ===", {
+        currentUpdateMode: this.state.currentUpdateMode,
+        isDownloadComplete: this.state.isDownloadComplete,
+        currentSpeed: this.state.currentSpeed,
+        timeRemaining: this.state.timeRemaining
+      });
       this.setState({
         isDownloadComplete: true,
         currentProgress: 100,
@@ -803,7 +834,7 @@ const App = {
       event.payload;
 
     this.setState({
-      isUpdateAvailable: true,
+      // REMOVED: isUpdateAvailable: true - Don't set this until we know files actually need updating!
       currentFileName: current_file,
       currentProgress: Math.min(100, progress),
       currentFileIndex: current_count,
@@ -832,7 +863,8 @@ const App = {
       isFileCheckComplete: true,
       currentUpdateMode: "complete",
     });
-    this.handleCompletion();
+    // REMOVED: this.handleCompletion() - This should only be called after DOWNLOADS complete, not file check!
+    // File check completion is handled by checkForUpdates() based on filesToUpdate.length
   },
 
   /**
@@ -853,7 +885,16 @@ const App = {
    * @return {void}
    */
   updateUI() {
+    // CRITICAL DEBUG: Track who's calling updateUI in a loop
     if (!this.deferredUpdate) {
+      const stack = new Error().stack;
+      const caller = stack.split('\n')[2]?.trim() || 'unknown';
+      if (this.lastUpdateUICaller && Date.now() - this.lastUpdateUITime < 50) {
+        uiLog("[updateUI TIGHT LOOP] Called again within 50ms", { previousCaller: this.lastUpdateUICaller, currentCaller: caller });
+      }
+      this.lastUpdateUICaller = caller;
+      this.lastUpdateUITime = Date.now();
+      
       this.deferredUpdate = requestAnimationFrame(() => {
         this.updateUIElements();
         this.deferredUpdate = null;
@@ -868,6 +909,35 @@ const App = {
    * @return {void}
    */
   updateUIElements() {
+    // CRITICAL FIX: Disconnect MutationObserver while we update UI to prevent infinite loops
+    const wasObserving = !!this.observer;
+    if (wasObserving) {
+      this.observer.disconnect();
+    }
+    
+    // CRITICAL DEBUG: Track what's calling updateUIElements in a tight loop
+    const now = Date.now();
+    if (!this.lastUIUpdateTime) this.lastUIUpdateTime = 0;
+    const timeSinceLastUpdate = now - this.lastUIUpdateTime;
+    
+    if (timeSinceLastUpdate < 50) { // Less than 50ms since last update = tight loop!
+      const stack = new Error().stack;
+      const caller = stack.split('\n')[2]?.trim() || 'unknown';
+      uiLog(`[TIGHT LOOP DETECTED] updateUIElements called ${timeSinceLastUpdate}ms after previous call`, { caller });
+    }
+    this.lastUIUpdateTime = now;
+    
+    // Debug logging to diagnose UI state issues
+    uiLog("=== updateUIElements called ===", {
+      currentUpdateMode: this.state.currentUpdateMode,
+      isUpdateAvailable: this.state.isUpdateAvailable,
+      isDownloadComplete: this.state.isDownloadComplete,
+      isFileCheckComplete: this.state.isFileCheckComplete,
+      currentSpeed: this.state.currentSpeed,
+      timeRemaining: this.state.timeRemaining,
+      currentProgress: this.state.currentProgress
+    });
+
     const elements = {
       statusString: document.getElementById("status-string"),
       filesProgress: document.getElementById("files-progress"),
@@ -913,6 +983,14 @@ const App = {
     this.updateProgressBar(elements);
     this.updateDownloadInfo(elements);
     this.updateElementsVisibility(elements);
+    
+    // CRITICAL FIX: Reconnect MutationObserver after we're done updating UI
+    if (wasObserving) {
+      const targetNode = document.getElementById("dl-status-string");
+      if (targetNode && this.observer) {
+        this.observer.observe(targetNode, { childList: true, subtree: true });
+      }
+    }
   },
 
   /**
@@ -1170,6 +1248,7 @@ const App = {
       lastSpeedSampleBytes: 0,
       calculatedTotalSpeed: 0,
     });
+    this.updateUI(); // Update UI to reflect the reset state
   },
 
   /**
@@ -1179,12 +1258,15 @@ const App = {
    * If there's a pending launcher update, it will be applied automatically.
    */
   handleCompletion() {
+    uiLog("=== handleCompletion called ===");
     this.setState({
       isDownloadComplete: true,
       isUpdateAvailable: false,
       currentProgress: 100,
       currentUpdateMode: "complete",
     });
+    this.updateUI(); // Update UI immediately to reflect completion
+    uiLog("After setState in handleCompletion", { mode: this.state.currentUpdateMode });
     
     // Check if there's a pending launcher update to apply
     if (this.pendingLauncherUpdate) {
@@ -1201,6 +1283,7 @@ const App = {
         isUpdateComplete: true,
         currentUpdateMode: "ready",
       });
+      this.updateUI(); // Update UI after transitioning to ready state
       // Re-enable the game launch button and language selector
       this.updateLaunchGameButton(false);
       this.toggleLanguageSelector(true);
@@ -1306,6 +1389,225 @@ const App = {
   },
 
   /**
+   * Initializes the Toolbox button based on installation status.
+   */
+  async initToolboxButton() {
+    try {
+      const toolboxBtn = document.getElementById("toolbox-btn");
+      const toolboxText = toolboxBtn?.querySelector("span");
+      const uninstallBtn = document.getElementById("uninstall-toolbox-btn");
+      
+      if (!toolboxBtn || !toolboxText) return;
+      
+      // Check if Toolbox is installed
+      const isInstalled = await invoke("is_toolbox_installed");
+      
+      if (isInstalled) {
+        toolboxText.textContent = this.t("TOOLBOX") || "Toolbox";
+        toolboxBtn.onclick = (e) => {
+          e.preventDefault();
+          this.launchToolbox();
+        };
+        
+        // Show and set up uninstall button
+        if (uninstallBtn) {
+          uninstallBtn.style.display = "block";
+          // Remove existing event listener and add new one to prevent duplicates
+          uninstallBtn.onclick = async (e) => {
+            e.preventDefault();
+            await this.uninstallToolbox();
+          };
+        }
+      } else {
+        toolboxText.textContent = "Install Toolbox";
+        toolboxBtn.onclick = (e) => {
+          e.preventDefault();
+          this.installToolbox();
+        };
+        
+        // Hide uninstall button
+        if (uninstallBtn) {
+          uninstallBtn.style.display = "none";
+          uninstallBtn.onclick = null; // Clear event handler
+        }
+      }
+    } catch (error) {
+      console.error("Failed to initialize Toolbox button:", error);
+    }
+  },
+
+  /**
+   * Installs TeraToolbox.
+   */
+  async installToolbox() {
+    try {
+      const progressContainer = document.getElementById("toolbox-progress-container");
+      const progressBar = document.getElementById("toolbox-progress-bar");
+      const progressText = document.getElementById("toolbox-progress-text");
+      
+      // Show progress container
+      if (progressContainer) progressContainer.style.display = "block";
+      if (progressBar) progressBar.style.width = "0%";
+      if (progressText) progressText.textContent = "Downloading Toolbox...";
+      
+      // Listen for progress
+      const unlisten = await listen("toolbox_install_progress", (event) => {
+        const { progress, status, downloaded_bytes, total_bytes } = event.payload;
+        
+        if (progressBar) {
+          progressBar.style.width = `${progress}%`;
+        }
+        
+        if (progressText) {
+          if (status === "downloading") {
+            const downloadedMB = downloaded_bytes ? (downloaded_bytes / (1024 * 1024)).toFixed(2) : 0;
+            const totalMB = total_bytes ? (total_bytes / (1024 * 1024)).toFixed(2) : 0;
+            progressText.textContent = `Downloading Toolbox... ${downloadedMB} MB / ${totalMB} MB (${progress}%)`;
+          } else if (status === "extracting") {
+            progressText.textContent = `Extracting Toolbox... ${progress}%`;
+          } else if (status === "complete") {
+            progressText.textContent = "Toolbox installed successfully!";
+          }
+        }
+      });
+      
+      // Start installation
+      await invoke("install_toolbox");
+      
+      // Cleanup listener
+      unlisten();
+      
+      // Reinitialize button
+      await this.initToolboxButton();
+      
+      // Get game path and show success dialog with installation location
+      try {
+        const gamePath = await invoke("get_game_path_string");
+        const installPath = `${gamePath}\\Binaries\\Toolbox`;
+        
+        const { message } = window.__TAURI__.dialog;
+        await message(
+          `Toolbox has been successfully installed!\n\nInstallation location:\n${installPath}`,
+          {
+            title: "Toolbox Installed",
+            type: "info"
+          }
+        );
+      } catch (err) {
+        console.error("Failed to get game path for info dialog:", err);
+      }
+      
+      // Hide progress after showing the dialog
+      setTimeout(() => {
+        if (progressContainer) progressContainer.style.display = "none";
+        if (progressBar) progressBar.style.width = "0%";
+      }, 1000);
+      
+    } catch (error) {
+      console.error("Failed to install Toolbox:", error);
+      this.showErrorMessage("Failed to install Toolbox: " + error);
+      
+      // Reset UI on error
+      const progressContainer = document.getElementById("toolbox-progress-container");
+      const progressBar = document.getElementById("toolbox-progress-bar");
+      if (progressContainer) progressContainer.style.display = "none";
+      if (progressBar) progressBar.style.width = "0%";
+    }
+  },
+
+  /**
+   * Uninstalls TeraToolbox.
+   */
+  async uninstallToolbox() {
+    console.log("uninstallToolbox called");
+    
+    try {
+      const { ask, message } = window.__TAURI__.dialog;
+      
+      // Check if Toolbox is currently running
+      let isRunning = false;
+      try {
+        isRunning = await invoke("is_toolbox_running");
+        console.log("Is Toolbox running?", isRunning);
+      } catch (checkError) {
+        console.error("Error checking if Toolbox is running:", checkError);
+        console.error("Full error details:", JSON.stringify(checkError));
+        // Continue anyway - assume not running if check fails
+      }
+      
+      if (isRunning) {
+        // Ask user to close Toolbox manually
+        await message(
+          "Toolbox is currently running.\n\nPlease close Toolbox before uninstalling.",
+          { title: "Close Toolbox First", type: "warning" }
+        );
+        return;
+      }
+      
+      // Ask for final confirmation
+      const confirmed = await ask("Are you sure you want to uninstall Toolbox?", {
+        title: "Confirm Uninstall",
+        type: "warning"
+      });
+      
+      console.log("User confirmation result:", confirmed);
+      
+      // Only proceed if user clicked Yes
+      if (!confirmed) {
+        console.log("User cancelled toolbox uninstallation");
+        return;
+      }
+      
+      console.log("Proceeding with uninstallation");
+      
+      const progressContainer = document.getElementById("toolbox-progress-container");
+      const progressBar = document.getElementById("toolbox-progress-bar");
+      const progressText = document.getElementById("toolbox-progress-text");
+      
+      // Show progress container
+      if (progressContainer) progressContainer.style.display = "block";
+      if (progressBar) {
+        progressBar.style.width = "100%";
+        // Change to red for uninstall
+        progressBar.style.background = "linear-gradient(90deg, #f44336, #d32f2f)";
+      }
+      if (progressText) progressText.textContent = "Uninstalling Toolbox...";
+      
+      await invoke("uninstall_toolbox");
+      
+      if (progressText) {
+        progressText.textContent = "Toolbox uninstalled successfully!";
+      }
+      
+      // Reinitialize button
+      await this.initToolboxButton();
+      
+      // Hide progress after a delay
+      setTimeout(() => {
+        if (progressContainer) progressContainer.style.display = "none";
+        if (progressBar) {
+          progressBar.style.width = "0%";
+          // Reset to green
+          progressBar.style.background = "linear-gradient(90deg, #4CAF50, #45a049)";
+        }
+      }, 3000);
+      
+    } catch (error) {
+      console.error("Failed to uninstall Toolbox:", error);
+      this.showErrorMessage("Failed to uninstall Toolbox: " + error);
+      
+      // Reset UI on error
+      const progressContainer = document.getElementById("toolbox-progress-container");
+      const progressBar = document.getElementById("toolbox-progress-bar");
+      if (progressContainer) progressContainer.style.display = "none";
+      if (progressBar) {
+        progressBar.style.width = "0%";
+        progressBar.style.background = "linear-gradient(90deg, #4CAF50, #45a049)";
+      }
+    }
+  },
+
+  /**
    * Checks for updates if needed. If no update is needed, it disables the update check button and
    * sets the state to indicate that the update is complete. If an update is needed, it sets the
    * state to indicate that the update is available and starts the update process.
@@ -1344,16 +1646,30 @@ const App = {
       const filesToUpdate = await invoke("get_files_to_update");
 
       if (filesToUpdate.length === 0) {
+        // CRITICAL FIX: Explicitly clear ALL download-related state when no files need updating
         this.setState({
           isUpdateAvailable: false,
           isFileCheckComplete: true,
+          isDownloadComplete: false, // Clear old download complete state
           currentUpdateMode: "complete",
+          currentProgress: 100,
+          totalFiles: 0,
+          currentFileIndex: 0,
+          downloadedSize: 0,
+          totalSize: 0,
+          currentSpeed: 0,
+          timeRemaining: 0,
+          currentFileName: "",
+          speedHistory: [],
+          calculatedTotalSpeed: 0,
         });
+        this.updateUI();
         // Re-enable elements if no update is needed
         this.updateLaunchGameButton(false);
         this.toggleLanguageSelector(true);
         setTimeout(() => {
           this.setState({ currentUpdateMode: "ready" });
+          this.updateUI();
         }, 1000);
       } else {
         this.setState({
@@ -1366,8 +1682,10 @@ const App = {
             0
           ),
         });
+        this.updateUI();
         setTimeout(async () => {
           this.setState({ currentUpdateMode: "download" });
+          this.updateUI();
           await this.runPatchSystem(filesToUpdate);
         }, 2000);
       }
@@ -1396,64 +1714,34 @@ const App = {
    * @returns {Promise<void>}
    */
   async runPatchSystem(filesToUpdate) {
+    uiLog(`[runPatchSystem] CALLED with ${filesToUpdate.length} files`);
     if (!UPDATE_CHECK_ENABLED) {
       console.log("Updates are disabled, skipping patch system");
       return;
     }
     try {
+      uiLog("[runPatchSystem] Starting patch process...");
       // Disable the game launch button and language selector at the start of the process
       this.updateLaunchGameButton(true);
       this.toggleLanguageSelector(false);
 
       if (filesToUpdate.length === 0) {
         console.log("No update needed");
+        uiLog("[runPatchSystem] No files to update");
+
         // Re-enable elements if no update is needed
         this.updateLaunchGameButton(false);
         this.toggleLanguageSelector(true);
         return;
       }
 
-      const downloadedSizes = await invoke("download_all_files", {
+      // Backend handles all download progress events and emits download_complete when done
+      // No need to process results here - just await completion
+      uiLog(`[runPatchSystem] Calling invoke('download_all_files') with ${filesToUpdate.length} files`);
+      const downloadResult = await invoke("download_all_files", {
         filesToUpdate: filesToUpdate,
       });
-
-      let totalDownloadedSize = 0;
-      let lastUpdateTime = Date.now();
-      let lastDownloadedSize = 0;
-      for (let i = 0; i < downloadedSizes.length; i++) {
-        const fileInfo = filesToUpdate[i];
-        const downloadedSize = downloadedSizes[i];
-        totalDownloadedSize += downloadedSize;
-
-        this.setState({
-          currentFileName: fileInfo.path,
-          currentFileIndex: i + 1,
-          downloadedSize: totalDownloadedSize,
-        });
-
-        const currentTime = Date.now();
-        const timeDiff = (currentTime - lastUpdateTime) / 1000; // in seconds
-        const sizeDiff = totalDownloadedSize - lastDownloadedSize;
-        const speed = sizeDiff / timeDiff; // bytes per second
-
-        // Emit a progress event if necessary
-        this.handleDownloadProgress({
-          payload: {
-            file_name: fileInfo.path,
-            progress: (totalDownloadedSize / this.state.totalSize) * 100,
-            speed: speed,
-            downloaded_bytes: totalDownloadedSize,
-            total_bytes: this.state.totalSize,
-            total_files: this.state.totalFiles,
-            current_file_index: i + 1,
-          },
-        });
-
-        lastUpdateTime = currentTime;
-        lastDownloadedSize = totalDownloadedSize;
-      }
-
-      this.handleCompletion();
+      uiLog(`[runPatchSystem] download_all_files returned:`, downloadResult);
     } catch (error) {
       console.error("Error during update:", error);
       this.showErrorMessage(this.t("UPDATE_ERROR_MESSAGE"));
@@ -2996,13 +3284,8 @@ const App = {
       appQuitButton.addEventListener("click", () => this.appQuit());
     }
 
-    const toolboxBtn = document.getElementById("toolbox-btn");
-    if (toolboxBtn) {
-      toolboxBtn.addEventListener("click", (e) => {
-        e.preventDefault();
-        this.launchToolbox();
-      });
-    }
+    // Toolbox button event listener removed - now handled dynamically in initToolboxButton()
+    // Uninstall button event listener removed - now handled in initToolboxButton()
   },
 
   /**
@@ -3154,6 +3437,9 @@ const App = {
     const isGameRunning = await this.isGameRunning();
     this.updateUIForGameStatus(isGameRunning);
     this.loadClientVersion();
+    
+    // Initialize Toolbox button after home page is loaded
+    await this.initToolboxButton();
   },
 
   // Update the initUserPanel method
@@ -4026,11 +4312,21 @@ App.Router = createRouter(App);
 // Expose App globally if necessary
 window.App = App;
 
-// Global function for toolbox button
+// Global function for toolbox button (legacy support)
 window.launchToolbox = async function() {
   try {
     const { invoke } = window.__TAURI__.tauri;
-    await invoke("launch_toolbox");
+    
+    // Check if installed first
+    const isInstalled = await invoke("is_toolbox_installed");
+    if (isInstalled) {
+      await invoke("launch_toolbox");
+    } else {
+      // Trigger install if not installed
+      if (window.App && window.App.installToolbox) {
+        await window.App.installToolbox();
+      }
+    }
   } catch (error) {
     console.error("Failed to launch Toolbox:", error);
     alert("Failed to launch Toolbox: " + error);

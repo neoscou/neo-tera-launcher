@@ -748,6 +748,12 @@ fn get_game_path() -> Result<PathBuf, String> {
   Ok(game_path)
 }
 
+#[tauri::command]
+fn get_game_path_string() -> Result<String, String> {
+  let game_path = get_game_path()?;
+  Ok(game_path.to_string_lossy().to_string())
+}
+
 
 #[tauri::command]
 fn save_game_path_to_config(path: String) -> Result<(), String> {
@@ -1041,6 +1047,9 @@ async fn download_all_files(
 ) -> Result<Vec<u64>, String> {
   let total_files = files_to_update.len();
   let total_size: u64 = files_to_update.iter().map(|f| f.size).sum();
+  
+  debug_log(&format!("=== download_all_files CALLED with {} files, {} total bytes ===", total_files, total_size));
+  println!("download_all_files: {} files, {} bytes", total_files, total_size);
 
   if total_files == 0 {
     println!("No files to download");
@@ -1095,14 +1104,27 @@ async fn download_all_files(
   
   // Wait for all downloads to complete
   let mut downloaded_sizes = Vec::with_capacity(total_files);
-  for handle in handles {
+  debug_log(&format!("Waiting for {} download tasks to complete...", handles.len()));
+  
+  for (index, handle) in handles.into_iter().enumerate() {
+    debug_log(&format!("Awaiting task {} of {}", index + 1, total_files));
     match handle.await {
-      Ok(Ok(size)) => downloaded_sizes.push(size),
-      Ok(Err(e)) => return Err(e),
-      Err(e) => return Err(format!("Download task panicked: {}", e)),
+      Ok(Ok(size)) => {
+        debug_log(&format!("Task {} completed successfully ({} bytes)", index + 1, size));
+        downloaded_sizes.push(size);
+      },
+      Ok(Err(e)) => {
+        debug_log(&format!("Task {} failed: {}", index + 1, e));
+        return Err(e);
+      },
+      Err(e) => {
+        debug_log(&format!("Task {} panicked: {}", index + 1, e));
+        return Err(format!("Download task panicked: {}", e));
+      },
     }
   }
 
+  debug_log("All download tasks completed!");
   println!("Download complete for {} file(s)", total_files);
   if let Err(e) = window.emit("download_complete", ()) {
     eprintln!("Failed to emit download_complete event: {}", e);
@@ -1616,7 +1638,7 @@ async fn launch_toolbox() -> Result<String, String> {
   let (game_path, _) = load_config()?;
   let toolbox_path = Path::new(&game_path)
     .join("Binaries")
-    .join("neolithic-TB")
+    .join("Toolbox")
     .join("TeraToolbox.exe");
   
   if !toolbox_path.exists() {
@@ -1641,6 +1663,376 @@ async fn launch_toolbox() -> Result<String, String> {
       Err(e) => {
         error!("Failed to launch TeraToolbox: {}", e);
         Err(format!("Failed to launch TeraToolbox: {}", e))
+      }
+    }
+}
+
+/// Checks if TeraToolbox is installed.
+#[tauri::command]
+async fn is_toolbox_installed() -> Result<bool, String> {
+  info!("Checking if TeraToolbox is installed");
+  
+  let (game_path, _) = load_config()?;
+  let toolbox_path = Path::new(&game_path)
+    .join("Binaries")
+    .join("Toolbox")
+    .join("TeraToolbox.exe");
+  
+  Ok(toolbox_path.exists())
+}
+
+/// Downloads and installs TeraToolbox.
+#[tauri::command]
+async fn install_toolbox(window: tauri::Window) -> Result<String, String> {
+  use futures_util::StreamExt;
+  use zip::ZipArchive;
+  
+  info!("Installing TeraToolbox");
+  
+  let (game_path, _) = load_config()?;
+  let binaries_path = Path::new(&game_path).join("Binaries");
+  let toolbox_path = binaries_path.join("Toolbox");
+  
+  // Create Binaries directory if it doesn't exist
+  std::fs::create_dir_all(&binaries_path)
+    .map_err(|e| format!("Failed to create Binaries directory: {}", e))?;
+  
+  let zip_path = binaries_path.join("Toolbox.zip");
+  
+  // Toolbox.zip is located in /Neolithic on R2
+  let file_server_url = get_files_server_url();
+  // Replace TeraDirect with Neolithic for Toolbox path
+  let base_url = file_server_url.replace("/TeraDirect", "/Neolithic");
+  
+  // Add timestamp to bypass CDN/R2 cache
+  let timestamp = std::time::SystemTime::now()
+    .duration_since(std::time::UNIX_EPOCH)
+    .unwrap()
+    .as_secs();
+  let zip_url = format!("{}/Toolbox.zip?t={}", base_url, timestamp);
+  
+  info!("Downloading Toolbox from: {}", zip_url);
+  
+  // Download with progress - disable caching to ensure fresh download
+  let client = reqwest::Client::new();
+  let response = client.get(zip_url)
+    .header("Cache-Control", "no-cache, no-store, must-revalidate")
+    .header("Pragma", "no-cache")
+    .header("Expires", "0")
+    .send()
+    .await
+    .map_err(|e| format!("Failed to download Toolbox: {}", e))?;
+  
+  let total_size = response.content_length().unwrap_or(0);
+  let mut downloaded: u64 = 0;
+  let mut file = std::fs::File::create(&zip_path)
+    .map_err(|e| format!("Failed to create ZIP file: {}", e))?;
+  
+  let mut stream = response.bytes_stream();
+  
+  while let Some(chunk) = stream.next().await {
+    let chunk = chunk.map_err(|e| format!("Failed to read chunk: {}", e))?;
+    file.write_all(&chunk)
+      .map_err(|e| format!("Failed to write to file: {}", e))?;
+    
+    downloaded += chunk.len() as u64;
+    
+    let progress = if total_size > 0 {
+      ((downloaded as f64 / total_size as f64) * 80.0) as u32 // 80% for download
+    } else {
+      0
+    };
+    
+    // Emit progress event
+    let _ = window.emit("toolbox_install_progress", serde_json::json!({
+      "progress": progress,
+      "downloaded_bytes": downloaded,
+      "total_bytes": total_size,
+      "status": "downloading"
+    }));
+  }
+  
+  drop(file); // Close the file before extraction
+  
+  info!("Download complete, extracting...");
+  
+  // Emit extracting status
+  let _ = window.emit("toolbox_install_progress", serde_json::json!({
+    "progress": 80,
+    "status": "extracting"
+  }));
+  
+  // Extract the ZIP file
+  let zip_file = std::fs::File::open(&zip_path)
+    .map_err(|e| format!("Failed to open ZIP file: {}", e))?;
+  
+  let mut archive = ZipArchive::new(zip_file)
+    .map_err(|e| format!("Failed to read ZIP archive: {}", e))?;
+  
+  // Remove existing Toolbox directory if it exists
+  if toolbox_path.exists() {
+    std::fs::remove_dir_all(&toolbox_path)
+      .map_err(|e| format!("Failed to remove existing Toolbox directory: {}", e))?;
+  }
+  
+  // Create Toolbox directory
+  std::fs::create_dir_all(&toolbox_path)
+    .map_err(|e| format!("Failed to create Toolbox directory: {}", e))?;
+  
+  // Get total file count for progress calculation
+  let total_files = archive.len();
+  
+  // Extract all files, stripping the top-level folder (e.g., neolithic-TB-main/)
+  for i in 0..total_files {
+    let mut file = archive.by_index(i)
+      .map_err(|e| format!("Failed to read file from archive: {}", e))?;
+    
+    let outpath = match file.enclosed_name() {
+      Some(path) => {
+        // Strip the first component (top-level folder) from the path
+        let components: Vec<_> = path.components().collect();
+        if components.len() > 1 {
+          // Skip the first component and join the rest
+          let stripped_path: PathBuf = components[1..].iter().collect();
+          toolbox_path.join(stripped_path)
+        } else {
+          // If it's just the top-level folder itself, skip it
+          continue;
+        }
+      },
+      None => continue,
+    };
+    
+    if file.name().ends_with('/') {
+      std::fs::create_dir_all(&outpath)
+        .map_err(|e| format!("Failed to create directory: {}", e))?;
+    } else {
+      if let Some(p) = outpath.parent() {
+        if !p.exists() {
+          std::fs::create_dir_all(&p)
+            .map_err(|e| format!("Failed to create parent directory: {}", e))?;
+        }
+      }
+      let mut outfile = std::fs::File::create(&outpath)
+        .map_err(|e| format!("Failed to create file: {}", e))?;
+      std::io::copy(&mut file, &mut outfile)
+        .map_err(|e| format!("Failed to extract file: {}", e))?;
+    }
+    
+    // Update progress during extraction (80-100%)
+    let extract_progress = 80 + ((i as f64 / total_files as f64) * 20.0) as u32;
+    let _ = window.emit("toolbox_install_progress", serde_json::json!({
+      "progress": extract_progress,
+      "status": "extracting"
+    }));
+  }
+  
+  // Clean up ZIP file
+  let _ = std::fs::remove_file(&zip_path);
+  
+  // Emit complete status
+  let _ = window.emit("toolbox_install_progress", serde_json::json!({
+    "progress": 100,
+    "status": "complete"
+  }));
+  
+  info!("TeraToolbox installed successfully");
+  Ok("TeraToolbox installed successfully".to_string())
+}
+
+/// Checks if TeraToolbox (Electron) is currently running.
+#[tauri::command]
+fn is_toolbox_running() -> Result<bool, String> {
+  #[cfg(windows)]
+  {
+    use std::process::Command;
+    
+    let log_msg = |msg: &str| {
+      debug_log(&format!("[is_toolbox_running] {}", msg));
+    };
+    
+    log_msg("Starting check...");
+    
+    let (game_path, _) = load_config()?;
+    let toolbox_path = Path::new(&game_path)
+      .join("Binaries")
+      .join("Toolbox");
+    
+    // Check if Toolbox directory exists
+    if !toolbox_path.exists() {
+      log_msg("Toolbox directory does not exist");
+      return Ok(false);
+    }
+    
+    log_msg(&format!("Toolbox path: {}", toolbox_path.display()));
+    
+    // Use a simpler PowerShell command that lists all electron processes with their paths
+    let ps_cmd = "Get-Process -Name 'electron' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Path";
+    
+    let output = Command::new("powershell")
+      .args(&["-Command", ps_cmd])
+      .creation_flags(0x08000000) // CREATE_NO_WINDOW
+      .output()
+      .map_err(|e| format!("Failed to check process: {}", e))?;
+    
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    
+    log_msg(&format!("Process check output:\n{}", stdout));
+    if !stderr.is_empty() {
+      log_msg(&format!("Process check error: {}", stderr));
+    }
+    
+    // Check if any of the paths contain our Toolbox directory
+    let toolbox_str = toolbox_path.to_string_lossy();
+    let is_running = stdout.lines().any(|line| {
+      let matches = line.contains(&*toolbox_str) || line.contains("\\Binaries\\Toolbox\\");
+      if matches {
+        log_msg(&format!("Found Toolbox process: {}", line));
+      }
+      matches
+    });
+    
+    log_msg(&format!("Result: {}", is_running));
+    Ok(is_running)
+  }
+  
+  #[cfg(not(windows))]
+  Ok(false)
+}
+
+/// Kills all running TeraToolbox (Electron) processes.
+#[tauri::command]
+fn kill_toolbox_process() -> Result<String, String> {
+  #[cfg(windows)]
+  {
+    use std::process::Command;
+    
+    let log_msg = |msg: &str| {
+      debug_log(&format!("[kill_toolbox_process] {}", msg));
+    };
+    
+    log_msg("Starting kill process...");
+    
+    // Use WMIC to find electron processes with Toolbox in their executable path
+    let wmic_cmd = "wmic process where \"name='electron.exe' and ExecutablePath like '%Binaries\\\\Toolbox%'\" get ProcessId /format:list";
+    
+    log_msg(&format!("Running WMIC command: {}", wmic_cmd));
+    
+    let output = Command::new("cmd")
+      .args(&["/C", wmic_cmd])
+      .creation_flags(0x08000000)
+      .output()
+      .map_err(|e| {
+        log_msg(&format!("Failed to execute WMIC: {}", e));
+        format!("Failed to execute WMIC: {}", e)
+      })?;
+    
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    
+    log_msg(&format!("WMIC output:\n{}", stdout));
+    if !stderr.is_empty() {
+      log_msg(&format!("WMIC stderr:\n{}", stderr));
+    }
+    
+    // Parse PIDs from WMIC output (format: ProcessId=12345)
+    let mut pids = Vec::new();
+    for line in stdout.lines() {
+      let line = line.trim();
+      if line.starts_with("ProcessId=") {
+        if let Some(pid) = line.strip_prefix("ProcessId=") {
+          let pid = pid.trim();
+          if !pid.is_empty() && pid.chars().all(|c| c.is_numeric()) {
+            log_msg(&format!("Found Toolbox PID: {}", pid));
+            pids.push(pid.to_string());
+          }
+        }
+      }
+    }
+    
+    if pids.is_empty() {
+      log_msg("No Toolbox processes found");
+      return Ok("No processes to kill".to_string());
+    }
+    
+    log_msg(&format!("Total PIDs to kill: {}", pids.len()));
+    
+    // Kill each process tree
+    for pid in pids {
+      log_msg(&format!("Killing process tree for PID: {}", pid));
+      let kill_cmd = format!("taskkill /F /T /PID {}", pid);
+      
+      let result = Command::new("cmd")
+        .args(&["/C", &kill_cmd])
+        .creation_flags(0x08000000)
+        .output();
+      
+      match result {
+        Ok(out) => {
+          let stdout = String::from_utf8_lossy(&out.stdout);
+          let stderr = String::from_utf8_lossy(&out.stderr);
+          log_msg(&format!("Taskkill output: {}", stdout));
+          if !stderr.is_empty() {
+            log_msg(&format!("Taskkill stderr: {}", stderr));
+          }
+        }
+        Err(e) => {
+          log_msg(&format!("Failed to execute taskkill: {}", e));
+        }
+      }
+    }
+    
+    log_msg("Kill commands executed, waiting for processes to terminate...");
+    
+    // Wait for processes to fully terminate
+    std::thread::sleep(std::time::Duration::from_millis(3000));
+    
+    log_msg("Done waiting, kill process complete");
+    Ok("Toolbox processes terminated".to_string())
+  }
+  
+  #[cfg(not(windows))]
+  Ok("Not supported on this platform".to_string())
+}
+
+/// Uninstalls TeraToolbox by removing the Toolbox directory.
+#[tauri::command]
+async fn uninstall_toolbox() -> Result<String, String> {
+  info!("Uninstalling TeraToolbox");
+  
+  let (game_path, _) = load_config()?;
+  let toolbox_dir = Path::new(&game_path)
+    .join("Binaries")
+    .join("Toolbox");
+  
+  if !toolbox_dir.exists() {
+    return Err("TeraToolbox is not installed".to_string());
+  }
+  
+  // Use PowerShell to remove directory with elevated permissions if needed
+  let toolbox_path_str = toolbox_dir.to_string_lossy().to_string();
+  
+  match std::process::Command::new("powershell")
+    .args(&[
+      "-WindowStyle", "Hidden",
+      "-Command",
+      &format!("Remove-Item -Path '{}' -Recurse -Force", toolbox_path_str)
+    ])
+    .output() {
+      Ok(output) => {
+        if output.status.success() {
+          info!("TeraToolbox uninstalled successfully");
+          Ok("TeraToolbox uninstalled successfully".to_string())
+        } else {
+          let error_msg = String::from_utf8_lossy(&output.stderr);
+          error!("Failed to uninstall TeraToolbox: {}", error_msg);
+          Err(format!("Failed to uninstall TeraToolbox: {}", error_msg))
+        }
+      },
+      Err(e) => {
+        error!("Failed to execute uninstall command: {}", e);
+        Err(format!("Failed to execute uninstall command: {}", e))
       }
     }
 }
@@ -2511,6 +2903,11 @@ fn get_launcher_version() -> String {
   get_current_launcher_version()
 }
 
+#[tauri::command]
+fn log_debug_message(message: String) -> Result<(), String> {
+  debug_log(&message);
+  Ok(())
+}
 
 fn main() {
 
@@ -2588,12 +2985,19 @@ fn main() {
         check_update_required,
         download_all_files,
         get_client_version,
+        get_game_path_string,
         check_maintenance_and_notify,
         get_fresh_account_info,
         get_signup_url,
         register,
         verify_registration,
         launch_toolbox,
+        is_toolbox_installed,
+        install_toolbox,
+        uninstall_toolbox,
+        is_toolbox_running,
+        kill_toolbox_process,
+        log_debug_message,
         // Launcher self-update commands
         check_launcher_update,
         download_launcher_update,
