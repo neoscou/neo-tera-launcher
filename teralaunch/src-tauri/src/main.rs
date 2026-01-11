@@ -29,9 +29,8 @@ fn debug_log(msg: &str) {
 
 // Third-party imports
 use dotenv::dotenv;
-use log::{LevelFilter, error, info};
+use log::{LevelFilter, error, info, warn};
 use tokio::sync::{watch, Mutex, mpsc};
-use tokio::io::{AsyncWriteExt, BufWriter};
 use rayon::prelude::*;
 use tokio::runtime::Runtime;
 use serde::{Deserialize, Serialize};
@@ -50,7 +49,6 @@ use walkdir::WalkDir;
 use reqwest::cookie::Jar;
 use reqwest::cookie::CookieStore;
 use url::Url;
-use regex::Regex;
 
 // Struct definitions
 #[derive(Serialize, Deserialize)]
@@ -1996,7 +1994,7 @@ fn kill_toolbox_process() -> Result<String, String> {
   Ok("Not supported on this platform".to_string())
 }
 
-/// Uninstalls TeraToolbox by removing the Toolbox directory.
+/// Uninstalls TeraToolbox by removing the entire Toolbox directory and all contents.
 #[tauri::command]
 async fn uninstall_toolbox() -> Result<String, String> {
   info!("Uninstalling TeraToolbox");
@@ -2010,31 +2008,41 @@ async fn uninstall_toolbox() -> Result<String, String> {
     return Err("TeraToolbox is not installed".to_string());
   }
   
-  // Use PowerShell to remove directory with elevated permissions if needed
-  let toolbox_path_str = toolbox_dir.to_string_lossy().to_string();
-  
-  match std::process::Command::new("powershell")
-    .args(&[
-      "-WindowStyle", "Hidden",
-      "-Command",
-      &format!("Remove-Item -Path '{}' -Recurse -Force", toolbox_path_str)
-    ])
-    .output() {
-      Ok(output) => {
-        if output.status.success() {
-          info!("TeraToolbox uninstalled successfully");
-          Ok("TeraToolbox uninstalled successfully".to_string())
-        } else {
-          let error_msg = String::from_utf8_lossy(&output.stderr);
-          error!("Failed to uninstall TeraToolbox: {}", error_msg);
-          Err(format!("Failed to uninstall TeraToolbox: {}", error_msg))
-        }
-      },
-      Err(e) => {
-        error!("Failed to execute uninstall command: {}", e);
-        Err(format!("Failed to execute uninstall command: {}", e))
-      }
+  // Try Rust's native removal first
+  match std::fs::remove_dir_all(&toolbox_dir) {
+    Ok(_) => {
+      info!("TeraToolbox uninstalled successfully using native removal");
+      return Ok("TeraToolbox uninstalled successfully".to_string());
     }
+    Err(e) => {
+      warn!("Native removal failed ({}), attempting PowerShell fallback", e);
+      // Fallback to PowerShell for locked files
+      let toolbox_path_str = toolbox_dir.to_string_lossy().to_string();
+      
+      match std::process::Command::new("powershell")
+        .args(&[
+          "-WindowStyle", "Hidden",
+          "-Command",
+          &format!("Remove-Item -Path '{}' -Recurse -Force -ErrorAction Stop", toolbox_path_str)
+        ])
+        .output() {
+          Ok(output) => {
+            if output.status.success() {
+              info!("TeraToolbox uninstalled successfully using PowerShell");
+              Ok("TeraToolbox uninstalled successfully".to_string())
+            } else {
+              let error_msg = String::from_utf8_lossy(&output.stderr);
+              error!("Failed to uninstall TeraToolbox: {}", error_msg);
+              Err(format!("Failed to remove Toolbox folder. Please ensure TeraToolbox is closed and try again.\n\nError: {}", error_msg))
+            }
+          },
+          Err(e) => {
+            error!("Failed to execute PowerShell command: {}", e);
+            Err(format!("Failed to remove Toolbox folder: {}", e))
+          }
+        }
+    }
+  }
 }
 
 /// Registers a new user account via the Portal API.
