@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal">
+  
+  <Bundle Name="Neolithic TERA"
+          Version="1.1.0"
+          Manufacturer="Neolithic TERA"
+          UpgradeCode="b2c3d4e5-f6a7-4b5c-8d9e-0f1a2b3c4d5e"
+          IconSourceFile="../teralaunch/src-tauri/icons/icon.ico"
+          SplashScreenSourceFile="splash.bmp">
+
+    <!-- Modern UI -->
+    <bal:WixStandardBootstrapperApplication 
+      LicenseUrl=""
+      Theme="hyperlinkLicense"
+      ThemeFile="BootstrapperTheme.xml"
+      LocalizationFile="BootstrapperTheme.wxl" />
+
+    <Chain>
+      <!-- Install .NET if needed (optional) -->
+      <!-- <PackageGroupRef Id="NetFx48WebRedist" /> -->
+      
+      <!-- Main MSI -->
+      <MsiPackage SourceFile="Output\NeolithicTERA-Setup.msi"
+                  DisplayInternalUI="no"
+                  Vital="yes">
+        <MsiProperty Name="INSTALLFOLDER" Value="[InstallFolder]" />
+      </MsiPackage>
+    </Chain>
+
+    <Variable Name="InstallFolder" Type="string" Value="[ProgramFiles64Folder]Neolithic TERA" />
+  </Bundle>
+
+</Wix>

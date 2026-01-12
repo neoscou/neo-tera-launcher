@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  
+  <Package Name="Neolithic TERA" 
+           Language="1033" 
+           Version="1.1.0" 
+           Manufacturer="Neolithic TERA" 
+           UpgradeCode="a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d"
+           InstallerVersion="500"
+           Compressed="yes">
+    
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Neolithic TERA is already installed." />
+    
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <!-- <Icon Id="ProductIcon" SourceFile="../teralaunch/src-tauri/icons/icon.ico" />
+    <Property Id="ARPPRODUCTICON" Value="ProductIcon" /> -->
+    <Property Id="ARPHELPLINK" Value="https://neolithictera.com" />
+    <Property Id="ARPURLINFOABOUT" Value="https://neolithictera.com" />
+    <Property Id="ARPNOREPAIR" Value="yes" />
+
+    <!-- Use custom modern UI -->
+    <UIRef Id="CustomUI" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Neolithic TERA">
+        
+        <!-- Main Launcher Executable -->
+        <Component Id="LauncherExe">
+          <File Source="SourceFiles\Neolithic TERA Launcher.exe" />
+        </Component>
+
+        <!-- file_cache.json -->
+        <Component Id="FileCacheJson">
+          <File Source="SourceFiles\file_cache.json" />
+        </Component>
+
+        <!-- Binaries Directory - All files -->
+        <Directory Id="BinariesDir" Name="Binaries" />
+
+        <!-- Engine Directory - All files -->
+        <Directory Id="EngineDir" Name="Engine" />
+
+      </Directory>
+    </StandardDirectory>
+
+    <!-- System Folders -->
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Component Id="StartMenuShortcut">
+        <Shortcut Id="StartMenuShortcutId"
+                  Name="Neolithic TERA"
+                  Description="Launch Neolithic TERA Online"
+                  Target="[INSTALLFOLDER]Neolithic TERA Launcher.exe"
+                  WorkingDirectory="INSTALLFOLDER" />
+        <RemoveFolder Id="RemoveProgramMenuFolder" On="uninstall" />
+        <RegistryValue Root="HKCU" Key="Software\NeolithicTERA" Name="installed" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <StandardDirectory Id="DesktopFolder">
+      <Component Id="DesktopShortcut">
+        <Shortcut Id="DesktopShortcutId"
+                  Name="Neolithic TERA"
+                  Description="Launch Neolithic TERA Online"
+                  Target="[INSTALLFOLDER]Neolithic TERA Launcher.exe"
+                  WorkingDirectory="INSTALLFOLDER" />
+        <RegistryValue Root="HKCU" Key="Software\NeolithicTERA" Name="desktop" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <!-- Features -->
+    <Feature Id="Complete">
+      <ComponentRef Id="LauncherExe" />
+      <ComponentRef Id="FileCacheJson" />
+      <ComponentRef Id="StartMenuShortcut" />
+      <ComponentRef Id="DesktopShortcut" />
+      <ComponentGroupRef Id="BinariesFiles" />
+      <ComponentGroupRef Id="EngineFiles" />
+    </Feature>
+
+  </Package>
+
+</Wix>

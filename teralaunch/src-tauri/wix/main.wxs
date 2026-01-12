@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*" 
+           Name="Neolithic TERA Launcher" 
+           Language="1033" 
+           Version="1.1.0" 
+           Manufacturer="Neolithic TERA" 
+           UpgradeCode="12345678-1234-1234-1234-123456789012">
+    
+    <Package InstallerVersion="450" 
+             Compressed="yes" 
+             InstallScope="perMachine"
+             Description="Neolithic TERA Launcher - Modern MMO Gaming Experience"
+             Comments="Official launcher for Neolithic TERA Online"
+             Manufacturer="Neolithic TERA" />
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+    
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <!-- Custom UI -->
+    <WixVariable Id="WixUILicenseRtf" Value="wix\license.rtf" />
+    <WixVariable Id="WixUIBannerBmp" Value="icons\banner.bmp" />
+    <WixVariable Id="WixUIDialogBmp" Value="icons\dialog.bmp" />
+    
+    <UIRef Id="WixUI_InstallDir" />
+    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
+
+    <!-- Application Icon -->
+    <Icon Id="ProductIcon" SourceFile="icons\logo.ico" />
+    <Property Id="ARPPRODUCTICON" Value="ProductIcon" />
+    
+    <!-- Add/Remove Programs Information -->
+    <Property Id="ARPHELPLINK" Value="https://neolithictera.com" />
+    <Property Id="ARPURLINFOABOUT" Value="https://neolithictera.com" />
+    <Property Id="ARPNOREPAIR" Value="yes" Secure="yes" />
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLFOLDER" Name="Neolithic TERA">
+          
+          <!-- Main Launcher Executable -->
+          <Component Id="MainExecutable" Guid="*" Win64="yes">
+            <File Id="LauncherExe" 
+                  Source="$(var.SourceDir)\Neolithic TERA Launcher.exe" 
+                  KeyPath="yes" />
+            
+            <!-- Desktop Shortcut -->
+            <Shortcut Id="DesktopShortcut"
+                      Directory="DesktopFolder"
+                      Name="Neolithic TERA"
+                      Description="Launch Neolithic TERA Online"
+                      WorkingDirectory="INSTALLFOLDER"
+                      Icon="ProductIcon"
+                      IconIndex="0"
+                      Advertise="yes" />
+            
+            <!-- Start Menu Shortcut -->
+            <Shortcut Id="StartMenuShortcut"
+                      Directory="ProgramMenuFolder"
+                      Name="Neolithic TERA"
+                      Description="Launch Neolithic TERA Online"
+                      WorkingDirectory="INSTALLFOLDER"
+                      Icon="ProductIcon"
+                      IconIndex="0"
+                      Advertise="yes" />
+          </Component>
+
+          <!-- Game Files Component Group (excluding tera_config.ini - users will create this) -->
+          <Component Id="FileCacheJson" Guid="*" Win64="yes">
+            <File Id="FileCacheJsonFile" Source="$(var.GameFilesDir)\file_cache.json" KeyPath="yes" />
+          </Component>
+
+          <!-- Binaries Directory -->
+          <Directory Id="BinariesDir" Name="Binaries">
+            <Component Id="BinariesComponent" Guid="*" Win64="yes">
+              <!-- This will be populated with game binaries -->
+              <CreateFolder />
+            </Component>
+          </Directory>
+
+          <!-- Client Directory -->
+          <Directory Id="ClientDir" Name="Client">
+            <Component Id="ClientComponent" Guid="*" Win64="yes">
+              <CreateFolder />
+            </Component>
+          </Directory>
+
+          <!-- S1Game Directory (excluding S1Data which will be downloaded) -->
+          <Directory Id="S1GameDir" Name="S1Game">
+            <Component Id="S1GameComponent" Guid="*" Win64="yes">
+              <CreateFolder />
+            </Component>
+            
+            <!-- CookedPC subdirectory structure -->
+            <Directory Id="CookedPCDir" Name="CookedPC">
+              <Component Id="CookedPCComponent" Guid="*" Win64="yes">
+                <CreateFolder />
+              </Component>
+            </Directory>
+          </Directory>
+
+        </Directory>
+      </Directory>
+
+      <!-- System Folders for Shortcuts -->
+      <Directory Id="ProgramMenuFolder" />
+      <Directory Id="DesktopFolder" Name="Desktop" />
+    </Directory>
+
+    <!-- Feature Definition -->
+    <Feature Id="Complete" Title="Neolithic TERA Launcher" Level="1"
+             Description="Complete installation including launcher and game files."
+             ConfigurableDirectory="INSTALLFOLDER"
+             Display="expand">
+      
+      <Feature Id="LauncherFeature" Title="Launcher Application" Level="1"
+               Description="Main launcher application and essential files.">
+        <ComponentRef Id="MainExecutable" />
+        <ComponentRef Id="FileCacheJson" />
+      </Feature>
+
+      <Feature Id="GameFilesFeature" Title="Game Files" Level="1"
+               Description="Game binaries and resources (S1Data will be downloaded by launcher).">
+        <ComponentRef Id="BinariesComponent" />
+        <ComponentRef Id="ClientComponent" />
+        <ComponentRef Id="S1GameComponent" />
+        <ComponentRef Id="CookedPCComponent" />
+      </Feature>
+    </Feature>
+
+    <!-- Custom Actions -->
+    <CustomAction Id="LaunchApplication" 
+                  FileKey="LauncherExe" 
+                  ExeCommand="" 
+                  Execute="immediate" 
+                  Impersonate="yes" 
+                  Return="asyncNoWait" />
+
+    <InstallExecuteSequence>
+      <Custom Action="LaunchApplication" After="InstallFinalize">NOT Installed</Custom>
+    </InstallExecuteSequence>
+
+  </Product>
+</Wix>

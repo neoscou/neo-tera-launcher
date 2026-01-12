@@ -27,6 +27,17 @@ fn debug_log(msg: &str) {
   println!("{}", msg);
 }
 
+// Clear debug log at startup to prevent file from growing indefinitely
+fn clear_debug_log() {
+  let log_path = std::env::current_exe()
+    .ok()
+    .and_then(|p| p.parent().map(|p| p.join("debug.log")))
+    .unwrap_or_else(|| PathBuf::from("debug.log"));
+  
+  // Delete the file if it exists
+  let _ = std::fs::remove_file(&log_path);
+}
+
 // Third-party imports
 use dotenv::dotenv;
 use log::{LevelFilter, error, info, warn};
@@ -755,12 +766,34 @@ fn get_game_path_string() -> Result<String, String> {
 
 #[tauri::command]
 fn save_game_path_to_config(path: String) -> Result<(), String> {
-  let config_path = find_config_file().ok_or("Config file not found")?;
-  let mut conf = Ini::load_from_file(&config_path).map_err(|e|
-    format!("Failed to load config: {}", e)
-  )?;
+  // Try to find existing config, or create a new one in the executable directory
+  let config_path = match find_config_file() {
+    Some(path) => path,
+    None => {
+      // Config doesn't exist - create it in the executable directory
+      let exe_dir = std::env::current_exe()
+        .map_err(|e| format!("Failed to get executable path: {}", e))?
+        .parent()
+        .ok_or("Failed to get executable directory")?
+        .to_path_buf();
+      
+      exe_dir.join("tera_config.ini")
+    }
+  };
+  
+  // Load existing config or create a new one
+  let mut conf = if config_path.exists() {
+    Ini::load_from_file(&config_path).map_err(|e|
+      format!("Failed to load config: {}", e)
+    )?
+  } else {
+    Ini::new()
+  };
 
-  conf.with_section(Some("game")).set("path", &path);
+  // Set both path and default language
+  conf.with_section(Some("game"))
+    .set("lang", "EUR")
+    .set("path", &path);
 
   conf.write_to_file(&config_path).map_err(|e| format!("Failed to write config: {}", e))?;
 
@@ -2919,6 +2952,8 @@ fn log_debug_message(message: String) -> Result<(), String> {
 
 fn main() {
 
+  // Clear debug log from previous session
+  clear_debug_log();
 
   dotenv().ok();
 

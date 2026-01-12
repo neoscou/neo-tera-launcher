@@ -37,13 +37,32 @@
     "bundle": {
       "active": true,
       "targets": "all",
-      "identifier": "com.teralib.dev",
+      "identifier": "com.neolithictera.launcher",
       "icon": [
         "icons/logo.png",
         "icons/logo.ico"
       ],
-      "copyright": "Neolithic TERA Launcher",
-      "shortDescription": "Neolithic TERA Launcher"
+      "copyright": "© 2026 Neolithic TERA. All rights reserved.",
+      "shortDescription": "Modern launcher for Neolithic TERA Online",
+      "longDescription": "Official launcher for Neolithic TERA Online private server. Download, update, and launch the game with ease.",
+      "publisher": "Neolithic TERA",
+      "windows": {
+        "certificateThumbprint": null,
+        "digestAlgorithm": "sha256",
+        "timestampUrl": "",
+        "wix": {
+          "language": "en-US",
+          "template": null,
+          "bannerPath": null,
+          "dialogImagePath": null,
+          "componentRefs": [],
+          "skipWebviewInstall": false,
+          "license": null
+        },
+        "webviewInstallMode": {
+          "type": "downloadBootstrapper"
+        }
+      }
     }
   }
 }

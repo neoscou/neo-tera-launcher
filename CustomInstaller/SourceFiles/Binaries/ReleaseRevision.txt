@@ -1,0 +1,10 @@
+SrcRegVer: 376946
+ReleaseName: Live-100.02 GF #11 (Gold)
+Version: Live-100.02 GF #11 (Gold)
+ReleaseDate: 2020-11-10 오후 2:40:05
+ShareRevision: 376290
+ClientRevision: 376871
+ServerRevision: 376946
+ReleaseDataRevision: 487849
+WebAppRevision: 376026
+TeraReleaseName: Live-100.02 GF #11 (Gold)

@@ -1,7 +1,7 @@
 const { invoke } = window.__TAURI__.tauri;
 const { listen } = window.__TAURI__.event;
 const { appWindow } = window.__TAURI__.window;
-const { message } = window.__TAURI__.dialog;
+const { message, ask } = window.__TAURI__.dialog;
 const { open: shellOpen } = window.__TAURI__.shell;
 
 const REQUIRED_PRIVILEGE_LEVEL = 3;
@@ -3805,8 +3805,7 @@ const App = {
 
   /**
    * Loads the game path from the config file and sets the input field value.
-   * If an error occurs, it displays the error in a Windows system message and
-   * offers the user the option to quit the app.
+   * If the config file is missing, prompts the user to select the game path.
    */
   async loadGamePath() {
     try {
@@ -3817,27 +3816,89 @@ const App = {
       }
     } catch (error) {
       console.error("Error loading game path:", error);
-      // Display the error in a Windows system message
-      let errorMessage;
-      if (
-        error &&
-        error.message &&
-        typeof error.message === "string" &&
-        error.message.toLowerCase().includes("tera_config.ini")
-      ) {
-        errorMessage = this.t("CONFIG_INI_MISSING");
+      
+      // Convert error to string for checking
+      const errorString = typeof error === 'string' ? error : (error?.message || String(error));
+      
+      // Check if the error is due to missing tera_config.ini
+      if (errorString.toLowerCase().includes("tera_config.ini")) {
+        // Config file is missing - prompt user to select game folder
+        console.log("Config file missing - prompting user");
+        const userResponse = await ask(
+          "The launcher configuration file is missing. Would you like to select your TERA game folder now?",
+          {
+            title: "Configuration Missing",
+            type: "warning",
+          }
+        );
+
+        console.log("User response to config prompt:", userResponse);
+
+        if (userResponse) {
+          // User wants to select the game folder
+          try {
+            console.log("Opening folder selection dialog");
+            const selectedPath = await invoke("select_game_folder");
+            console.log("Selected path:", selectedPath);
+            
+            if (selectedPath) {
+              // Save the selected path to config
+              console.log("Saving game path to config:", selectedPath);
+              await this.saveGamePath(selectedPath);
+              console.log("Game path saved successfully");
+              
+              // Update the input field
+              const input = document.getElementById("gameFolder");
+              if (input) {
+                input.value = selectedPath;
+              }
+              
+              // Show success message
+              await message(
+                "Game folder has been set successfully! The launcher is now ready to use.",
+                {
+                  title: "Success",
+                  type: "info",
+                }
+              );
+            } else {
+              console.log("No path selected - user cancelled");
+              // User cancelled folder selection
+              await message(
+                "Game folder selection was cancelled. The launcher requires a valid game path to function.",
+                {
+                  title: "Configuration Required",
+                  type: "warning",
+                }
+              );
+              this.appQuit();
+            }
+          } catch (selectionError) {
+            console.error("Error selecting game folder:", selectionError);
+            await message(
+              `Failed to select game folder: ${selectionError}`,
+              {
+                title: "Error",
+                type: "error",
+              }
+            );
+            this.appQuit();
+          }
+        } else {
+          // User declined to select folder
+          this.appQuit();
+        }
       } else {
-        errorMessage = `${this.t("GAME_PATH_LOAD_ERROR")} ${
+        // Other error - show error message and quit
+        const errorMessage = `${this.t("GAME_PATH_LOAD_ERROR")} ${
           error && error ? error : ""
         }`;
-      }
 
-      const userResponse = await message(errorMessage, {
-        title: this.t("ERROR"),
-        type: "error",
-      });
+        await message(errorMessage, {
+          title: this.t("ERROR"),
+          type: "error",
+        });
 
-      if (userResponse) {
         this.appQuit();
       }
     }

@@ -1,0 +1,166 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Fragment>
+    <ComponentGroup Id="BinariesFiles" Directory="BinariesDir">
+      <Component Id="BinFile1">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\binkw64.dll" />
+      </Component>
+      <Component Id="BinFile2">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\CoherentGTCore.dll" />
+      </Component>
+      <Component Id="BinFile3">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\CoherentGTJS.dll" />
+      </Component>
+      <Component Id="BinFile4">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\coherenticuin.dll" />
+      </Component>
+      <Component Id="BinFile5">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\coherenticuuc.dll" />
+      </Component>
+      <Component Id="BinFile6">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\CoherentUIGT.dll" />
+      </Component>
+      <Component Id="BinFile7">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\cookies.dat" />
+      </Component>
+      <Component Id="BinFile8">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\cudart64_41_22.dll" />
+      </Component>
+      <Component Id="BinFile9">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\D3DCompiler_43.dll" />
+      </Component>
+      <Component Id="BinFile10">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\d3dx11_43.dll" />
+      </Component>
+      <Component Id="BinFile11">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\D3DX9_43.dll" />
+      </Component>
+      <Component Id="BinFile12">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\dbghelp.dll" />
+      </Component>
+      <Component Id="BinFile13">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\EasyHook64.dll" />
+      </Component>
+      <Component Id="BinFile14">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\file_cache.json" />
+      </Component>
+      <Component Id="BinFile15">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\icudtcoherent53.dll" />
+      </Component>
+      <Component Id="BinFile16">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\libogg_64.dll" />
+      </Component>
+      <Component Id="BinFile17">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\libvorbisfile_64.dll" />
+      </Component>
+      <Component Id="BinFile18">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\libvorbis_64.dll" />
+      </Component>
+      <Component Id="BinFile19">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\msvcp120.dll" />
+      </Component>
+      <Component Id="BinFile20">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\msvcp140.dll" />
+      </Component>
+      <Component Id="BinFile21">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\msvcr100.dll" />
+      </Component>
+      <Component Id="BinFile22">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\msvcr120.dll" />
+      </Component>
+      <Component Id="BinFile23">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\Neolithic TERA.bat" />
+      </Component>
+      <Component Id="BinFile24">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\Neolithic TERA.exe" />
+      </Component>
+      <Component Id="BinFile25">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\nvtt_64.dll" />
+      </Component>
+      <Component Id="BinFile26">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\patch-product-name.ps1" />
+      </Component>
+      <Component Id="BinFile27">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\patch_product_name.py" />
+      </Component>
+      <Component Id="BinFile28">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\PhysXCooking64.dll" />
+      </Component>
+      <Component Id="BinFile29">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\PhysXCore64.dll" />
+      </Component>
+      <Component Id="BinFile30">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\PhysXLoader64.dll" />
+      </Component>
+      <Component Id="BinFile31">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\ReleaseRevision.txt" />
+      </Component>
+      <Component Id="BinFile32">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\RenoirCore.WindowsDesktop.dll" />
+      </Component>
+      <Component Id="BinFile33">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\SecureEngineSDK64.dll" />
+      </Component>
+      <Component Id="BinFile34">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\slsurl.txt" />
+      </Component>
+      <Component Id="BinFile35">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\steam_api64.dll" />
+      </Component>
+      <Component Id="BinFile36">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\steam_api_loader.dll" />
+      </Component>
+      <Component Id="BinFile37">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\tbbmalloc.dll" />
+      </Component>
+      <Component Id="BinFile38">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\TERA.exe" />
+      </Component>
+      <Component Id="BinFile39">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\vcruntime140.dll" />
+      </Component>
+      <Component Id="BinFile40">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\vcruntime140_1.dll" />
+      </Component>
+      <Component Id="BinFile41">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\WTF.dll" />
+      </Component>
+      <Component Id="BinFile42">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\wxmsw28u_adv_vc_custom_64.dll" />
+      </Component>
+      <Component Id="BinFile43">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\wxmsw28u_aui_vc_custom_64.dll" />
+      </Component>
+      <Component Id="BinFile44">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\wxmsw28u_core_vc_custom_64.dll" />
+      </Component>
+      <Component Id="BinFile45">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\wxmsw28u_html_vc_custom_64.dll" />
+      </Component>
+      <Component Id="BinFile46">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\wxmsw28u_propgrid_vc_custom_64.dll" />
+      </Component>
+      <Component Id="BinFile47">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\wxmsw28u_richtext_vc_custom_64.dll" />
+      </Component>
+      <Component Id="BinFile48">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\wxmsw28u_vc_custom_64.dll" />
+      </Component>
+      <Component Id="BinFile49">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\wxmsw28u_xml_vc_custom_64.dll" />
+      </Component>
+      <Component Id="BinFile50">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\wxmsw28u_xrc_vc_custom_64.dll" />
+      </Component>
+      <Component Id="BinFile51">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\X3DAudio1_7.dll" />
+      </Component>
+      <Component Id="BinFile52">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\XAPOFX1_5.dll" />
+      </Component>
+      <Component Id="BinFile53">
+        <File Source="D:\V100TERA\BACKUP_WORKING_LAUNCHER_2024-12-16\tera-rust-launcher\CustomInstaller\SourceFiles\Binaries\xinput1_3.dll" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+</Wix>
