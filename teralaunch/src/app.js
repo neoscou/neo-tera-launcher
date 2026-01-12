@@ -1744,7 +1744,22 @@ const App = {
       uiLog(`[runPatchSystem] download_all_files returned:`, downloadResult);
     } catch (error) {
       console.error("Error during update:", error);
-      this.showErrorMessage(this.t("UPDATE_ERROR_MESSAGE"));
+      
+      // Show detailed error message
+      const errorMessage = typeof error === 'string' ? error : (error?.message || String(error));
+      
+      // Check if it's a hash mismatch error
+      if (errorMessage.includes('Hash mismatch')) {
+        this.showErrorMessage(`Download verification failed:\n${errorMessage}\n\nPlease contact support or try regenerating the hash file.`);
+      } else {
+        this.showErrorMessage(`${this.t("UPDATE_ERROR_MESSAGE")}\n\nDetails: ${errorMessage}`);
+      }
+      
+      // Reset download state
+      this.setState({
+        currentUpdateMode: null,
+        isDownloadComplete: false,
+      });
     } finally {
       // Re-enable the game launch button and language selector at the end of the process
       this.updateLaunchGameButton(false);

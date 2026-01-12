@@ -14,9 +14,9 @@
                         },
                         {
                             "path":  "S1Game/Config",
-                            "file_count":  19,
-                            "total_size":  115915,
-                            "hash":  "993aae951e7b8501d9d5d20c80a9f8d76fb664023d7ca87b4a081030a8277e82"
+                            "file_count":  14,
+                            "total_size":  28387,
+                            "hash":  "b48b4f4218ba71eb0b1c31decda710993ad154fb0bc1c20149c1bf334d6fbca6"
                         },
                         {
                             "path":  "S1Game/Content/Cursor",
@@ -2481,8 +2481,8 @@
                         {
                             "path":  "S1Game/S1Data",
                             "file_count":  8,
-                            "total_size":  361575967,
-                            "hash":  "0f2d1abee0a9b917f03726041535ad95dcd24fbc5daec1da763ba34d8d7f47b8"
+                            "total_size":  361570319,
+                            "hash":  "625384ac27ba04a2ca92dc97b2cb0be9e7712aad2a7c65b20b2be83bfd337085"
                         },
                         {
                             "path":  "S1Game/S1Data/test",
@@ -2583,40 +2583,10 @@
                       "hash":  "96ED86579DE1B43D8F8FB1C250D6C0CEDDBAD7896DFE7D61532F0DFF2DE4D95E"
                   },
                   {
-                      "path":  "S1Game/Config/S1Engine.ini",
-                      "url":  "https://www.neolithictera.com/TeraDirect/S1Game/Config/S1Engine.ini",
-                      "size":  33349,
-                      "hash":  "5D3E2CF90BE9201DE54247483F50A925FFC5DA55B4C4DF244440E383A938E0AD"
-                  },
-                  {
-                      "path":  "S1Game/Config/S1Game.ini",
-                      "url":  "https://www.neolithictera.com/TeraDirect/S1Game/Config/S1Game.ini",
-                      "size":  4537,
-                      "hash":  "1FCD691D5702D0582AF1C54B7DCB4DB55644235F5366DF24E7C6C014C5ECC6D4"
-                  },
-                  {
-                      "path":  "S1Game/Config/S1Input.ini",
-                      "url":  "https://www.neolithictera.com/TeraDirect/S1Game/Config/S1Input.ini",
-                      "size":  19929,
-                      "hash":  "60D7F24FBF5829D6CB0B58FF26C449E24CAFEB50A4EF67B885750EE2C2C3AB32"
-                  },
-                  {
                       "path":  "S1Game/Config/S1Lightmass.ini",
                       "url":  "https://www.neolithictera.com/TeraDirect/S1Game/Config/S1Lightmass.ini",
                       "size":  6955,
                       "hash":  "8124AA3CF9505B8E6FDF9726819CF8F688C5D1697E50D136123333C69551AB4B"
-                  },
-                  {
-                      "path":  "S1Game/Config/S1Option.ini",
-                      "url":  "https://www.neolithictera.com/TeraDirect/S1Game/Config/S1Option.ini",
-                      "size":  3745,
-                      "hash":  "8C31F1538F71C3E7D834DEEBB237CF9B3687C19B0B94F42C6CDF6A913196BEF9"
-                  },
-                  {
-                      "path":  "S1Game/Config/S1SystemSettings.ini",
-                      "url":  "https://www.neolithictera.com/TeraDirect/S1Game/Config/S1SystemSettings.ini",
-                      "size":  25968,
-                      "hash":  "6865E23AA7C2160BD679D2D15D6BF72EB04F8373F093A3B545128D2852937FC2"
                   },
                   {
                       "path":  "S1Game/Config/S1TBASettings.ini",
