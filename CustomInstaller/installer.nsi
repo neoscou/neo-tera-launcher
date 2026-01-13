@@ -7,12 +7,13 @@
 # Installer settings
 Name "Neolithic TERA"
 OutFile "Output\NeolithicTERA-Setup.exe"
-InstallDir "$PROGRAMFILES64\Neolithic TERA"
+InstallDir "$PROGRAMFILES64"
 InstallDirRegKey HKLM "Software\NeolithicTERA" "Install_Dir"
 RequestExecutionLevel admin
 
 # Ensure directory page doesn't auto-append folder name
 !define MUI_PAGE_CUSTOMFUNCTION_SHOW DirectoryShow
+DirText "Choose the folder where you want to install Neolithic TERA. The files will be installed directly into the folder you select."
 
 # Modern UI Configuration
 !define MUI_ABORTWARNING
@@ -111,14 +112,22 @@ SectionEnd
 
 # Uninstaller Section
 Section "Uninstall"
-  # Remove files
+  # Only remove files that WE installed - never use wildcard deletion!
+  
+  # Remove launcher files
   Delete "$INSTDIR\Neolithic TERA Launcher.exe"
   Delete "$INSTDIR\file_cache.json"
   Delete "$INSTDIR\Uninstall.exe"
   
+  # Remove config files created by launcher
+  Delete "$INSTDIR\tera_config.ini"
+  Delete "$INSTDIR\debug.log"
+  Delete "$INSTDIR\hash-file.json"
+  
+  # Remove only the folders WE created
   RMDir /r "$INSTDIR\Binaries"
   RMDir /r "$INSTDIR\Engine"
-  RMDir "$INSTDIR"
+  RMDir /r "$INSTDIR\S1Game"
   
   # Remove shortcuts
   Delete "$SMPROGRAMS\Neolithic TERA\*.*"
@@ -128,4 +137,8 @@ Section "Uninstall"
   # Remove registry keys
   DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\NeolithicTERA"
   DeleteRegKey HKLM "Software\NeolithicTERA"
+  
+  # Only remove the installation directory if it's empty (safety check)
+  # This will fail silently if there are other files in the directory
+  RMDir "$INSTDIR"
 SectionEnd

@@ -961,13 +961,35 @@ span#current-file {
   min-width: 64px;
 }
 .download-speed {
-  width: 396px;
+  width: 100%;
   display: flex;
   flex-direction: row;
-  align-items: flex-start;
+  align-items: center;
   justify-content: flex-start;
-  gap: 5px;
+  gap: 8px;
   max-width: 100%;
+  flex-wrap: wrap;
+}
+
+.eta-string,
+.files-string,
+.io-string {
+  font-weight: 600;
+  color: #E8D5A3;
+}
+
+.eta-time,
+.files-count,
+.io-net,
+.io-disk,
+.io-write {
+  color: #9a8a6d;
+  font-weight: 400;
+}
+
+.io-separator {
+  color: rgba(255, 255, 255, 0.3);
+  margin: 0 2px;
 }
 .client-version,
 .v-10002 {

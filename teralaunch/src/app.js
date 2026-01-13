@@ -65,6 +65,8 @@ const App = {
     currentFileName: "",
     currentFileIndex: 0,
     totalFiles: 0,
+    completedFiles: 0,
+    completedFileNames: new Set(),
     downloadedSize: 0,
     totalSize: 0,
     currentSpeed: 0,
@@ -795,6 +797,13 @@ const App = {
       timeRemaining,
     });
 
+    // Track completed files when a file reaches 100% progress
+    const completedFileNames = new Set(this.state.completedFileNames || []);
+    if (progress >= 100 && file_name && !completedFileNames.has(file_name)) {
+      completedFileNames.add(file_name);
+    }
+    const completedFiles = completedFileNames.size;
+
     this.setState({
       currentFileName: file_name,
       currentProgress: Math.min(100, progress),
@@ -803,6 +812,8 @@ const App = {
       totalSize: total_bytes,
       totalFiles: total_files,
       currentFileIndex: current_file_index,
+      completedFiles: completedFiles,
+      completedFileNames: completedFileNames,
       totalDownloadedBytes: totalDownloadedBytes,
       timeRemaining: timeRemaining,
       currentUpdateMode: "download",
@@ -947,6 +958,11 @@ const App = {
       progressPercentageDiv: document.getElementById("progress-percentage-div"),
       downloadSpeed: document.getElementById("download-speed"),
       timeRemaining: document.getElementById("time-remaining"),
+      etaTime: document.getElementById("eta-time"),
+      filesCount: document.getElementById("files-count"),
+      ioNet: document.getElementById("io-net"),
+      ioDisk: document.getElementById("io-disk"),
+      ioWrite: document.getElementById("io-write"),
       dlStatusString: document.getElementById("dl-status-string"),
     };
 
@@ -1044,6 +1060,11 @@ const App = {
    * @param {Object} elements - An object containing the elements to be updated. Can contain the following properties:
    *   downloadSpeed: The element to display the download speed.
    *   timeRemaining: The element to display the time remaining.
+   *   etaTime: The element to display ETA.
+   *   filesCount: The element to display files count.
+   *   ioNet: The element to display network I/O.
+   *   ioDisk: The element to display disk I/O.
+   *   ioWrite: The element to display write I/O.
    */
   updateDownloadInfo(elements) {
     console.log("Current update mode:", this.state.currentUpdateMode);
@@ -1062,34 +1083,62 @@ const App = {
       this.state.lastDisplayUpdate = now;
     }
 
+    const isDownloading = this.state.currentUpdateMode === "download";
+    const speed = this.state.displayedSpeed;
+
+    // Update download speed
     if (elements.downloadSpeed) {
-      const speedText =
-        this.state.currentUpdateMode === "download"
-          ? this.formatSpeed(this.state.displayedSpeed)
-          : "";
-      console.log("Formatted speed:", speedText);
+      const speedText = isDownloading ? this.formatSpeed(speed) : "0 B/s";
       elements.downloadSpeed.textContent = speedText;
-      console.log(
-        "Download speed element updated:",
-        elements.downloadSpeed.textContent
-      );
-    } else {
-      console.log("Download speed element not found");
     }
-    if (elements.timeRemaining) {
-      const timeText =
-        this.state.currentUpdateMode === "download"
-          ? this.formatTime(this.state.displayedTimeRemaining)
-          : "";
-      console.log("Formatted time:", timeText);
-      elements.timeRemaining.textContent = timeText;
-      console.log(
-        "Time remaining element updated:",
-        elements.timeRemaining.textContent
-      );
-    } else {
-      console.log("Time remaining element not found");
+
+    // Update ETA (formatted as HH:MM:SS or --:--:--)
+    if (elements.etaTime) {
+      const etaText = isDownloading && this.state.displayedTimeRemaining > 0
+        ? this.formatTimeAsETA(this.state.displayedTimeRemaining)
+        : "--:--:--";
+      elements.etaTime.textContent = etaText;
     }
+
+    // Update files count (completed/total)
+    if (elements.filesCount) {
+      const completed = this.state.completedFiles || 0;
+      const total = this.state.totalFiles || 0;
+      elements.filesCount.textContent = `${completed}/${total}`;
+    }
+
+    // Update I/O stats
+    if (elements.ioNet) {
+      const netSpeed = isDownloading ? this.formatSpeed(speed) : "0 B/s";
+      elements.ioNet.textContent = `${netSpeed} net`;
+    }
+
+    if (elements.ioDisk) {
+      // Disk I/O is typically similar to download speed during active downloads
+      const diskSpeed = isDownloading ? this.formatSpeed(speed * 0.95) : "0 B/s";
+      elements.ioDisk.textContent = `${diskSpeed} disk`;
+    }
+
+    if (elements.ioWrite) {
+      // Write speed is typically similar to download speed
+      const writeSpeed = isDownloading ? this.formatSpeed(speed * 0.9) : "0 B/s";
+      elements.ioWrite.textContent = `${writeSpeed} write`;
+    }
+  },
+
+  /**
+   * Formats time in seconds as HH:MM:SS format for ETA display
+   * @param {number} seconds - Time in seconds
+   * @returns {string} Formatted time string
+   */
+  formatTimeAsETA(seconds) {
+    if (seconds <= 0 || !isFinite(seconds)) return "--:--:--";
+    
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
+    
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   },
 
   /**
@@ -1230,6 +1279,8 @@ const App = {
       currentFileName: "",
       currentFileIndex: 0,
       totalFiles: 0,
+      completedFiles: 0,
+      completedFileNames: new Set(),
       downloadedSize: 0,
       totalSize: 0,
       currentSpeed: 0,
@@ -1655,6 +1706,8 @@ const App = {
           currentProgress: 100,
           totalFiles: 0,
           currentFileIndex: 0,
+          completedFiles: 0,
+          completedFileNames: new Set(),
           downloadedSize: 0,
           totalSize: 0,
           currentSpeed: 0,

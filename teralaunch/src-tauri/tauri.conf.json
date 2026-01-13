@@ -6,7 +6,7 @@
   },
   "package": {
     "productName": "Neolithic TERA Launcher",
-    "version": "1.1.0"
+    "version": "1.2.0"
   },
   "tauri": {
     "allowlist": {
@@ -21,8 +21,8 @@
         "title": "Neolithic TERA Launcher",
         "width": 1282,
         "height": 759,
-        "minWidth": 1280,
-        "minHeight": 1024,
+        "minWidth": 1366,
+        "minHeight": 960,
         "resizable": true,
         "decorations": false,
         "transparent": true,

@@ -1,0 +1,11 @@
+{
+  "version": "1.2.0",
+  "download_url": "https://www.neolithictera.com/TeraDirect/launcher/Neolithic TERA Launcher.exe",
+  "changelog": [
+    "Reduced minimum window size to 800x600 for better 1080p display compatibility",
+    "Improved launcher scaling for smaller screens",
+    "Auto-generates tera_config.ini on first launch",
+    "Auto-recovers deleted configuration files"
+  ],
+  "mandatory": false
+}

@@ -800,6 +800,42 @@ fn save_game_path_to_config(path: String) -> Result<(), String> {
   Ok(())
 }
 
+/// Auto-creates tera_config.ini on first launch if it doesn't exist
+fn ensure_config_exists() -> Result<(), String> {
+  // Check if config already exists
+  if find_config_file().is_some() {
+    return Ok(()); // Config exists, nothing to do
+  }
+
+  // Config doesn't exist - create it with default values
+  let exe_dir = std::env::current_exe()
+    .map_err(|e| format!("Failed to get executable path: {}", e))?
+    .parent()
+    .ok_or("Failed to get executable directory")?
+    .to_path_buf();
+
+  // The game files should be in the same directory as the launcher
+  let game_path = exe_dir.to_str()
+    .ok_or("Failed to convert path to string")?
+    .replace("\\", "\\\\"); // Escape backslashes for INI format
+
+  let config_path = exe_dir.join("tera_config.ini");
+
+  let mut conf = Ini::new();
+  conf.with_section(Some("game"))
+    .set("path", &game_path)
+    .set("lang", "EUR");
+
+  conf.write_to_file(&config_path)
+    .map_err(|e| format!("Failed to create config file: {}", e))?;
+
+  println!("Auto-created tera_config.ini at: {:?}", config_path);
+  println!("  path: {}", game_path);
+  println!("  lang: EUR");
+
+  Ok(())
+}
+
 #[tauri::command]
 fn get_game_path_from_config() -> Result<String, String> {
   match get_game_path() {
@@ -809,7 +845,21 @@ fn get_game_path_from_config() -> Result<String, String> {
       .map(|s| s.to_string()),
     Err(e) => {
       if e.contains("Config file not found") {
-        Err("tera_config.ini is missing".to_string())
+        // Config is missing - auto-recreate it
+        println!("Config file missing, auto-creating...");
+        if let Err(create_err) = ensure_config_exists() {
+          eprintln!("Failed to auto-create config: {}", create_err);
+          return Err("tera_config.ini is missing".to_string());
+        }
+        
+        // Try to get the path again after creating config
+        match get_game_path() {
+          Ok(game_path) => game_path
+            .to_str()
+            .ok_or_else(|| "Invalid UTF-8 in game path".to_string())
+            .map(|s| s.to_string()),
+          Err(retry_err) => Err(retry_err)
+        }
       } else {
         Err(e)
       }
@@ -2715,42 +2765,64 @@ async fn check_launcher_update() -> Result<LauncherUpdateInfo, String> {
   let update_url = get_launcher_update_url();
   let current_version = get_current_launcher_version();
   
-  println!("Checking for launcher updates at: {}", update_url);
-  println!("Current launcher version: {}", current_version);
+  debug_log(&format!("[LAUNCHER UPDATE] Checking for launcher updates at: {}", update_url));
+  debug_log(&format!("[LAUNCHER UPDATE] Current launcher version: {}", current_version));
   
   let client = Client::builder()
     .timeout(Duration::from_secs(30))
     .build()
-    .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+    .map_err(|e| {
+      let err_msg = format!("Failed to create HTTP client: {}", e);
+      debug_log(&format!("[LAUNCHER UPDATE ERROR] {}", err_msg));
+      err_msg
+    })?;
   
   let response = client
     .get(&update_url)
     .send()
     .await
-    .map_err(|e| format!("Failed to fetch update manifest: {}", e))?;
+    .map_err(|e| {
+      let err_msg = format!("Failed to fetch update manifest: {}", e);
+      debug_log(&format!("[LAUNCHER UPDATE ERROR] {}", err_msg));
+      err_msg
+    })?;
   
   if !response.status().is_success() {
-    return Err(format!("Update manifest request failed with status: {}", response.status()));
+    let err_msg = format!("Update manifest request failed with status: {}", response.status());
+    debug_log(&format!("[LAUNCHER UPDATE ERROR] {}", err_msg));
+    return Err(err_msg);
   }
   
   let manifest: LauncherUpdateManifest = response
     .json()
     .await
-    .map_err(|e| format!("Failed to parse update manifest: {}", e))?;
+    .map_err(|e| {
+      let err_msg = format!("Failed to parse update manifest: {}", e);
+      debug_log(&format!("[LAUNCHER UPDATE ERROR] {}", err_msg));
+      err_msg
+    })?;
   
-  println!("Latest launcher version available: {}", manifest.version);
+  debug_log(&format!("[LAUNCHER UPDATE] Latest launcher version available: {}", manifest.version));
   
   // Compare versions
-  let update_available = compare_versions(&current_version, &manifest.version) == std::cmp::Ordering::Less;
+  let comparison = compare_versions(&current_version, &manifest.version);
+  let update_available = comparison == std::cmp::Ordering::Less;
   
-  Ok(LauncherUpdateInfo {
+  debug_log(&format!("[LAUNCHER UPDATE] Version comparison: {} vs {} = {:?}, update_available: {}", 
+    current_version, manifest.version, comparison, update_available));
+  
+  let update_info = LauncherUpdateInfo {
     update_available,
-    current_version,
+    current_version: current_version.clone(),
     latest_version: manifest.version.clone(),
     download_url: if update_available { Some(manifest.download_url) } else { None },
     changelog: manifest.changelog,
     mandatory: manifest.mandatory.unwrap_or(false),
-  })
+  };
+  
+  debug_log(&format!("[LAUNCHER UPDATE] Returning update_info: update_available={}", update_info.update_available));
+  
+  Ok(update_info)
 }
 
 /// Download the launcher update and prepare it for installation
@@ -2990,6 +3062,12 @@ fn main() {
     ::default()
     .manage(game_state)
     .setup(|app| {
+      // Auto-create tera_config.ini if it doesn't exist
+      if let Err(e) = ensure_config_exists() {
+        eprintln!("Warning: Failed to auto-create config: {}", e);
+        // Continue anyway - user can select folder later if needed
+      }
+      
       let window = app.get_window("main").unwrap();
       let app_handle = app.handle();
       println!("Tauri setup started");
